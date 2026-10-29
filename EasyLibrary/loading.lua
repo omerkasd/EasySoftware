@@ -1,42 +1,7 @@
---[[
-	EasyLibrary · loading.lua
-	Standalone loading screen.
-
-	local Loading = loadstring(game:HttpGet("https://raw.githubusercontent.com/<USER>/EasySoftware/main/EasyLibrary/loading.lua"))()
-
-	local loader = Loading.new({
-		Title = "EasyLibrary",
-		Subtitle = "My Script",
-		Logo = "rbxassetid://0000000000",   -- optional, a 512x512 icon works best
-		Theme = "Dark",                      -- "Dark" | "Light" | custom theme table
-		Accent = Color3.fromHex("7C5CFF"),
-		Font = "Ubuntu",                     -- name, Enum.Font or Font
-		Steps = { "Checking environment", "Loading modules", "Building interface", "Applying config" },
-		Keybind = Enum.KeyCode.RightShift,   -- false hides the hint
-	})
-
-	-- Option A: run one function per step; each gets a sub-progress callback.
-	loader:Run({
-		function(progress) ... end,
-		function(progress) for i = 1, 10 do progress(i / 10) end end,
-		function() ... end,
-		function() ... end,
-	})
-
-	-- Option B: drive it by hand.
-	loader:SetStep(1)
-	loader:SetProgress(0.1)
-	loader:Finish()   -- marks everything done, fades out, destroys itself
-]]
-
 local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
-
---------------------------------------------------------------------------------
--- Constants
---------------------------------------------------------------------------------
 
 local THEMES = {
 	Dark = {
@@ -51,6 +16,7 @@ local THEMES = {
 		tx3 = Color3.fromHex("85858F"),
 		danger = Color3.fromHex("FF6B6B"),
 		ok = Color3.fromHex("3DCB7A"),
+		shadow = Color3.fromHex("000000"),
 	},
 	Light = {
 		bg = Color3.fromHex("F4F4F2"),
@@ -64,6 +30,7 @@ local THEMES = {
 		tx3 = Color3.fromHex("686871"),
 		danger = Color3.fromHex("C93439"),
 		ok = Color3.fromHex("1F9D57"),
+		shadow = Color3.fromHex("14181F"),
 	},
 }
 
@@ -89,31 +56,76 @@ local FONTS = {
 }
 
 local KEY_NAMES = {
-	RightShift = "RShift", LeftShift = "LShift",
-	RightControl = "RCtrl", LeftControl = "LCtrl",
-	RightAlt = "RAlt", LeftAlt = "LAlt",
-	Insert = "Ins", Delete = "Del", PageUp = "PgUp", PageDown = "PgDn",
+	RightShift = "RShift",
+	LeftShift = "LShift",
+	RightControl = "RCtrl",
+	LeftControl = "LCtrl",
+	RightAlt = "RAlt",
+	LeftAlt = "LAlt",
+	Insert = "Ins",
+	Delete = "Del",
+	PageUp = "PgUp",
+	PageDown = "PgDn",
 }
 
-local DEFAULT_STEPS = { "Checking environment", "Loading modules", "Building interface", "Applying config" }
-local DEFAULT_ACCENT = Color3.fromHex("7C5CFF")
-local DARK_TEXT = Color3.fromHex("111113")
+local DEFAULTS = {
+	Title = "EasyLibrary",
+	Subtitle = nil,
+	Logo = nil,
+	Theme = "Dark",
+	Accent = Color3.fromHex("7C5CFF"),
+	Font = "Ubuntu",
+	Mode = "Real",
+	Steps = { "Checking environment", "Loading modules", "Building interface", "Applying config" },
+	Keybind = Enum.KeyCode.RightShift,
+	HintPrefix = "Press",
+	HintText = "to show or hide the menu",
+	ReadyText = "Ready",
+	FailText = "Something went wrong",
+	Width = 380,
+	ShowSubtitle = true,
+	ShowPercent = true,
+	ShowSteps = true,
+	ShowHint = true,
+	Dim = true,
+	DimTransparency = 0.45,
+	Blur = false,
+	BlurSize = 12,
+	AutoScale = true,
+	Scale = 1,
+	Name = "EasyLibrary_Loading",
+	Parent = nil,
+	DisplayOrder = 1000,
+	ReplaceExisting = true,
+	AutoProgress = true,
+	AutoFinish = true,
+	FinishDelay = 0.6,
+	Animations = true,
+	AnimationSpeed = 1,
+	Shimmer = true,
+	OnFinished = nil,
+	OnFailed = nil,
+}
 
-local WIDTH = 380
+local FAKE_DEFAULTS = {
+	AutoStart = true,
+	StartDelay = 0.35,
+	Duration = nil,
+	StepDuration = 1.2,
+	Jitter = 0.15,
+	Style = "Smooth",
+	Seed = nil,
+}
+
 local PAD_X, PAD_TOP, PAD_BOTTOM, GAP = 24, 28, 20, 22
 local HEADER_H, PROGRESS_H, FOOTER_H = 44, 30, 37
 local ROW_H, ROW_GAP, BOX_PAD_Y = 24, 2, 8
+local DARK_TEXT = Color3.fromHex("111113")
+local WHITE = Color3.new(1, 1, 1)
 
-local EASE = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-local OPEN = TweenInfo.new(0.35, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
-local CLOSE = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-local SPIN = TweenInfo.new(0.8, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, -1)
+local Style = Enum.EasingStyle
+local Direction = Enum.EasingDirection
 
---------------------------------------------------------------------------------
--- Helpers
---------------------------------------------------------------------------------
-
--- Theme tokens: `tok.box` marks a property as themed so it can be recolored later.
 local tok = setmetatable({}, {
 	__index = function(t, k)
 		local v = { __tok = k }
@@ -125,24 +137,32 @@ local tok = setmetatable({}, {
 local function fontSpec(weight, mono)
 	return { __font = weight, mono = mono }
 end
-local F_REG, F_MED, F_SEMI, F_BOLD = fontSpec("Regular"), fontSpec("Medium"), fontSpec("SemiBold"), fontSpec("Bold")
+
+local F_REG = fontSpec("Regular")
+local F_SEMI = fontSpec("SemiBold")
+local F_BOLD = fontSpec("Bold")
 local F_MONO = fontSpec("Regular", true)
 
 local function luminance(c)
 	local function ch(v)
-		return v <= 0.03928 and v / 12.92 or ((v + 0.055) / 1.055) ^ 2.4
+		if v <= 0.03928 then
+			return v / 12.92
+		end
+		return ((v + 0.055) / 1.055) ^ 2.4
 	end
 	return 0.2126 * ch(c.R) + 0.7152 * ch(c.G) + 0.0722 * ch(c.B)
 end
 
 local DARK_TEXT_LUM = luminance(DARK_TEXT)
 
--- Picks dark or white text, whichever reads better on the accent.
 local function textOn(c)
 	local l = luminance(c)
 	local vsWhite = 1.05 / (l + 0.05)
 	local vsDark = (l + 0.05) / (DARK_TEXT_LUM + 0.05)
-	return vsDark >= vsWhite and DARK_TEXT or Color3.new(1, 1, 1)
+	if vsDark >= vsWhite then
+		return DARK_TEXT
+	end
+	return WHITE
 end
 
 local function fontFamily(f)
@@ -161,7 +181,43 @@ local function keyLabel(k)
 	return KEY_NAMES[k] or tostring(k)
 end
 
--- Minimal signal so callers can wait on completion without an extra Instance.
+local function merge(base, over)
+	local out = {}
+	for k, v in pairs(base) do
+		out[k] = v
+	end
+	if type(over) == "table" then
+		for k, v in pairs(over) do
+			out[k] = v
+		end
+	end
+	return out
+end
+
+local function resolveTheme(theme)
+	if type(theme) == "table" then
+		return merge(THEMES[theme.Base or "Dark"] or THEMES.Dark, theme)
+	end
+	return THEMES[theme] or THEMES.Dark
+end
+
+local function normalizeSteps(list)
+	local out = {}
+	for i, s in ipairs(list or {}) do
+		if type(s) == "table" then
+			out[i] = {
+				name = tostring(s.Name or s[1] or ("Step " .. i)),
+				duration = tonumber(s.Duration),
+				messages = type(s.Messages) == "table" and #s.Messages > 0 and s.Messages or nil,
+				weight = math.max(tonumber(s.Weight) or 1, 0.01),
+			}
+		else
+			out[i] = { name = tostring(s), weight = 1 }
+		end
+	end
+	return out
+end
+
 local Signal = {}
 Signal.__index = Signal
 
@@ -207,45 +263,97 @@ function Signal:Fire(...)
 	end
 end
 
---------------------------------------------------------------------------------
--- Loading
---------------------------------------------------------------------------------
-
 local Loading = {}
 Loading.__index = Loading
 Loading.Themes = THEMES
 Loading.Fonts = FONTS
 
 function Loading.new(options)
-	options = options or {}
+	local opts = merge(DEFAULTS, options)
+	if opts.Keybind == false then
+		opts.ShowHint = false
+	end
 
 	local self = setmetatable({}, Loading)
-	self._opts = options
-	self._theme = (type(options.Theme) == "table" and options.Theme) or THEMES[options.Theme or "Dark"] or THEMES.Dark
-	self._accent = options.Accent or DEFAULT_ACCENT
+	self._opts = opts
+	self._fake = merge(FAKE_DEFAULTS, opts.Fake)
+	self._theme = resolveTheme(opts.Theme)
+	self._accent = typeof(opts.Accent) == "Color3" and opts.Accent or DEFAULTS.Accent
 	self._onAccent = textOn(self._accent)
-	self._family = fontFamily(options.Font or "Ubuntu")
+	self._family = fontFamily(opts.Font)
 	self._monoFamily = Font.fromEnum(Enum.Font.RobotoMono).Family
+	self._animate = opts.Animations ~= false
+	self._speed = math.max(tonumber(opts.AnimationSpeed) or 1, 0.05)
+	self._width = math.max(tonumber(opts.Width) or 380, 260)
+	self._rng = Random.new(opts.Fake and opts.Fake.Seed or nil)
 
-	self._themed = {}   -- [Instance] = { [property] = token }
-	self._fonted = {}   -- [Instance] = fontSpec
+	self._themed = {}
+	self._fonted = {}
 	self._conns = {}
-	self._fades = {}    -- { instance, property, visibleValue }
+	self._loops = {}
+	self._shadows = {}
 	self._steps = {}
 	self._current = 0
 	self._progress = 0
 	self._failed = false
 	self._finished = false
 	self._destroyed = false
+	self._running = false
+
+	self._pop = self:_info(0.42, Style.Back, Direction.Out)
+	self._quick = self:_info(0.22, Style.Quad, Direction.Out)
+	self._ease = self:_info(0.3, Style.Quint, Direction.Out)
 
 	self.Finished = Signal.new()
+	self.Failed = Signal.new()
+	if type(opts.OnFinished) == "function" then
+		self.Finished:Connect(opts.OnFinished)
+	end
+	if type(opts.OnFailed) == "function" then
+		self.Failed:Connect(opts.OnFailed)
+	end
 
-	self:_build(options.Steps or DEFAULT_STEPS)
+	self:_build(normalizeSteps(opts.Steps))
 	self:_open()
+
+	if string.lower(tostring(opts.Mode)) == "fake" and self._fake.AutoStart ~= false then
+		self:Start()
+	end
 	return self
 end
 
--- Instance factory: resolves theme tokens and font specs, parents last.
+function Loading:_info(time, style, direction, repeatCount, reverses, delay)
+	return TweenInfo.new(
+		time / (self._speed or 1),
+		style or Style.Quint,
+		direction or Direction.Out,
+		repeatCount or 0,
+		reverses or false,
+		(delay or 0) / (self._speed or 1)
+	)
+end
+
+function Loading:_tween(inst, info, goal)
+	if not self._animate then
+		for k, v in pairs(goal) do
+			inst[k] = v
+		end
+		return nil
+	end
+	local t = TweenService:Create(inst, info, goal)
+	t:Play()
+	return t
+end
+
+function Loading:_loop(inst, info, goal)
+	if not self._animate then
+		return nil
+	end
+	local t = TweenService:Create(inst, info, goal)
+	self._loops[#self._loops + 1] = t
+	return t
+end
+
 function Loading:_new(class, props, parent)
 	local inst = Instance.new(class)
 	for k, v in pairs(props) do
@@ -281,14 +389,23 @@ function Loading:_corner(parent, radius)
 	return self:_new("UICorner", { CornerRadius = radius or UDim.new(0.5, 0) }, parent)
 end
 
-function Loading:_bind(inst, prop, token)
+function Loading:_record(inst, prop, token)
 	local map = self._themed[inst]
 	if not map then
 		map = {}
 		self._themed[inst] = map
 	end
 	map[prop] = token
+end
+
+function Loading:_bind(inst, prop, token)
+	self:_record(inst, prop, token)
 	inst[prop] = self:_color(token)
+end
+
+function Loading:_bindTween(inst, prop, token, info)
+	self:_record(inst, prop, token)
+	self:_tween(inst, info or self._quick, { [prop] = self:_color(token) })
 end
 
 function Loading:_color(token)
@@ -304,46 +421,46 @@ function Loading:_fontFor(spec)
 	return Font.new(spec.mono and self._monoFamily or self._family, Enum.FontWeight[spec.__font])
 end
 
-function Loading:_fade(inst, prop, visible)
-	self._fades[#self._fades + 1] = { inst, prop, visible }
-end
-
 function Loading:_build(steps)
 	local opts = self._opts
+	local width = self._width
 	local n = #steps
-	local hasFooter = opts.Keybind ~= false
+	local showSteps = opts.ShowSteps ~= false and n > 0
 	local stepsH = BOX_PAD_Y * 2 + n * ROW_H + math.max(n - 1, 0) * ROW_GAP
-	local height = PAD_TOP + HEADER_H + GAP + PROGRESS_H + GAP + stepsH
-		+ (hasFooter and (GAP + FOOTER_H) or 0) + PAD_BOTTOM
+
+	local height = PAD_TOP + HEADER_H + GAP + PROGRESS_H + PAD_BOTTOM
+	if showSteps then
+		height = height + GAP + stepsH
+	end
+	if opts.ShowHint then
+		height = height + GAP + FOOTER_H
+	end
 	self._height = height
 
-	local name = opts.Name or "EasyLibrary_Loading"
 	local parent = opts.Parent or Players.LocalPlayer:WaitForChild("PlayerGui")
 	if opts.ReplaceExisting ~= false then
-		local old = parent:FindFirstChild(name)
+		local old = parent:FindFirstChild(opts.Name)
 		if old then
 			old:Destroy()
 		end
 	end
 
-	-- The whole tree is built unparented and attached once at the end.
 	local gui = self:_new("ScreenGui", {
-		Name = name,
+		Name = opts.Name,
 		ResetOnSpawn = false,
 		IgnoreGuiInset = true,
 		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-		DisplayOrder = opts.DisplayOrder or 1000,
+		DisplayOrder = opts.DisplayOrder,
 	})
 	self._gui = gui
 
-	if opts.Dim ~= false then
-		local dim = self:_frame({
+	if opts.Dim then
+		self._dim = self:_frame({
 			Name = "Dim",
 			Size = UDim2.fromScale(1, 1),
 			BackgroundColor3 = Color3.new(0, 0, 0),
 			BackgroundTransparency = 1,
 		}, gui)
-		self:_fade(dim, "BackgroundTransparency", opts.DimTransparency or 0.45)
 	end
 
 	local holder = self:_frame({
@@ -355,36 +472,38 @@ function Loading:_build(steps)
 	}, gui)
 	self._fitScale = self:_new("UIScale", {}, holder)
 
-	-- Two soft layers stand in for a drop shadow (no image asset needed).
-	for i, spec in ipairs({ { 18, 14, 0.86 }, { 8, 8, 0.78 } }) do
-		local grow, offsetY, alpha = spec[1], spec[2], spec[3]
+	local stack = self:_frame({
+		Name = "Stack",
+		Size = UDim2.fromOffset(0, 0),
+		BackgroundTransparency = 1,
+	}, holder)
+	self._stack = stack
+
+	local shadowSpecs = { { 22, 16, 0.88 }, { 10, 8, 0.8 } }
+	for i, spec in ipairs(shadowSpecs) do
 		local shadow = self:_frame({
 			Name = "Shadow" .. i,
 			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromOffset(0, offsetY),
-			Size = UDim2.fromOffset(WIDTH + grow, height + grow),
-			BackgroundColor3 = Color3.new(0, 0, 0),
+			Position = UDim2.fromOffset(0, spec[2]),
+			Size = UDim2.fromOffset(width + spec[1], height + spec[1]),
+			BackgroundColor3 = tok.shadow,
 			BackgroundTransparency = 1,
-		}, holder)
-		self:_corner(shadow, UDim.new(0, 12 + grow / 2))
-		self:_fade(shadow, "BackgroundTransparency", alpha)
+		}, stack)
+		self:_corner(shadow, UDim.new(0, 12 + math.floor(spec[1] / 2)))
+		self._shadows[i] = { frame = shadow, alpha = spec[3] }
 	end
 
-	-- CanvasGroup gives one clean fade for the whole card. Its background is the
-	-- 1px border; the surface is inset by 1px on top of it.
 	local card = self:_new("CanvasGroup", {
 		Name = "Card",
 		AnchorPoint = Vector2.new(0.5, 0.5),
 		Position = UDim2.fromOffset(0, 0),
-		Size = UDim2.fromOffset(WIDTH, height),
+		Size = UDim2.fromOffset(width, height),
 		BackgroundColor3 = tok.line2,
 		BorderSizePixel = 0,
 		GroupTransparency = 1,
-	}, holder)
+	}, stack)
 	self:_corner(card, UDim.new(0, 12))
 	self._card = card
-	self._cardScale = self:_new("UIScale", { Scale = 0.96 }, card)
-	self:_fade(card, "GroupTransparency", 0)
 
 	local surface = self:_frame({
 		Name = "Surface",
@@ -405,7 +524,26 @@ function Loading:_build(steps)
 		Padding = UDim.new(0, GAP),
 	}, surface)
 
-	-- Header ------------------------------------------------------------------
+	self:_buildHeader(surface)
+	self:_buildProgress(surface)
+	self:_buildSteps(surface, steps, stepsH, showSteps)
+	if opts.ShowHint then
+		self:_buildHint(surface)
+	end
+
+	self:SetTitle(opts.Title)
+	self:SetSubtitle(opts.ShowSubtitle ~= false and opts.Subtitle or nil)
+	self:SetLogo(opts.Logo)
+
+	if opts.Blur then
+		self._blur = self:_new("BlurEffect", { Name = opts.Name .. "_Blur", Size = 0 }, Lighting)
+	end
+
+	gui.Parent = parent
+	self:_bindViewport()
+end
+
+function Loading:_buildHeader(surface)
 	local header = self:_frame({
 		Name = "Header",
 		LayoutOrder = 1,
@@ -420,6 +558,7 @@ function Loading:_build(steps)
 	}, header)
 	self:_corner(logo, UDim.new(0, 11))
 	self._logo = logo
+	self._logoScale = self:_new("UIScale", { Scale = self._animate and 0.82 or 1 }, logo)
 	self._logoLetter = self:_label({
 		Name = "Letter",
 		Size = UDim2.fromScale(1, 1),
@@ -456,23 +595,27 @@ function Loading:_build(steps)
 		TextColor3 = tok.tx3,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, header)
+end
 
-	-- Progress ----------------------------------------------------------------
+function Loading:_buildProgress(surface)
+	local showPercent = self._opts.ShowPercent ~= false
 	local progress = self:_frame({
 		Name = "Progress",
 		LayoutOrder = 2,
 		Size = UDim2.new(1, 0, 0, PROGRESS_H),
 		BackgroundTransparency = 1,
 	}, surface)
+
 	self._status = self:_label({
 		Name = "Status",
-		Size = UDim2.new(1, -56, 0, 16),
+		Size = showPercent and UDim2.new(1, -56, 0, 16) or UDim2.new(1, 0, 0, 16),
 		Text = "",
 		TextSize = 12,
 		FontFace = F_REG,
 		TextColor3 = tok.tx2,
 		TextTruncate = Enum.TextTruncate.AtEnd,
 	}, progress)
+
 	self._percent = self:_label({
 		Name = "Percent",
 		AnchorPoint = Vector2.new(1, 0),
@@ -483,7 +626,9 @@ function Loading:_build(steps)
 		FontFace = F_MONO,
 		TextColor3 = tok.tx2,
 		TextXAlignment = Enum.TextXAlignment.Right,
+		Visible = showPercent,
 	}, progress)
+
 	local track = self:_frame({
 		Name = "Track",
 		Position = UDim2.fromOffset(0, 24),
@@ -492,6 +637,7 @@ function Loading:_build(steps)
 		ClipsDescendants = true,
 	}, progress)
 	self:_corner(track, UDim.new(0, 3))
+
 	self._fill = self:_frame({
 		Name = "Fill",
 		Size = UDim2.fromScale(0, 1),
@@ -499,20 +645,35 @@ function Loading:_build(steps)
 	}, track)
 	self:_corner(self._fill, UDim.new(0, 3))
 
-	-- One NumberValue drives both the bar and the percentage text, so a single
-	-- tween animates everything and nothing runs while progress is idle.
+	if self._opts.Shimmer ~= false and self._animate then
+		local shimmer = self:_new("UIGradient", {
+			Offset = Vector2.new(-1, 0),
+			Transparency = NumberSequence.new({
+				NumberSequenceKeypoint.new(0, 0.22),
+				NumberSequenceKeypoint.new(0.38, 0.22),
+				NumberSequenceKeypoint.new(0.5, 0),
+				NumberSequenceKeypoint.new(0.62, 0.22),
+				NumberSequenceKeypoint.new(1, 0.22),
+			}),
+		}, self._fill)
+		self._shimmer = shimmer
+		self._shimmerTween = self:_loop(shimmer, self:_info(1.5, Style.Sine, Direction.InOut, -1, false, 0.35), { Offset = Vector2.new(1, 0) })
+	end
+
 	self._value = Instance.new("NumberValue")
 	self._conns[#self._conns + 1] = self._value.Changed:Connect(function(v)
 		self._fill.Size = UDim2.fromScale(v, 1)
 		self._percent.Text = math.floor(v * 100 + 0.5) .. "%"
 	end)
+end
 
-	-- Steps -------------------------------------------------------------------
+function Loading:_buildSteps(surface, steps, stepsH, visible)
 	local box = self:_frame({
 		Name = "Steps",
 		LayoutOrder = 3,
 		Size = UDim2.new(1, 0, 0, stepsH),
 		BackgroundColor3 = tok.box,
+		Visible = visible,
 	}, surface)
 	self:_corner(box, UDim.new(0, 8))
 	self:_new("UIStroke", { Color = tok.line, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, box)
@@ -528,25 +689,34 @@ function Loading:_build(steps)
 		Padding = UDim.new(0, ROW_GAP),
 	}, box)
 
-	for i, text in ipairs(steps) do
+	local animate = self._animate
+	for i, data in ipairs(steps) do
 		local row = self:_frame({
 			Name = "Step" .. i,
 			LayoutOrder = i,
 			Size = UDim2.new(1, 0, 0, ROW_H),
 			BackgroundTransparency = 1,
 		}, box)
+		local content = self:_frame({
+			Name = "Content",
+			Position = UDim2.fromOffset(animate and -10 or 0, 0),
+			Size = UDim2.fromScale(1, 1),
+			BackgroundTransparency = 1,
+		}, row)
 		local icon = self:_frame({
 			Name = "Icon",
 			AnchorPoint = Vector2.new(0, 0.5),
 			Position = UDim2.fromScale(0, 0.5),
 			Size = UDim2.fromOffset(14, 14),
 			BackgroundTransparency = 1,
-		}, row)
+		}, content)
+		local iconScale = self:_new("UIScale", { Scale = animate and 0.5 or 1 }, icon)
 
 		local done = self:_frame({ Name = "Done", Size = UDim2.fromScale(1, 1), BackgroundColor3 = tok.accent, Visible = false }, icon)
 		self:_corner(done)
-		-- Check mark from two rotated bars (no font glyph or image needed).
-		for _, leg in ipairs({ { 5, 8, 5, 45 }, { 8, 7, 8, -50 } }) do
+		local doneScale = self:_new("UIScale", {}, done)
+		local legs = { { 5, 8, 5, 45 }, { 8, 7, 8, -50 } }
+		for _, leg in ipairs(legs) do
 			local bar = self:_frame({
 				AnchorPoint = Vector2.new(0.5, 0.5),
 				Position = UDim2.fromOffset(leg[1], leg[2]),
@@ -568,12 +738,13 @@ function Loading:_build(steps)
 
 		local fail = self:_frame({ Name = "Fail", Size = UDim2.fromScale(1, 1), BackgroundColor3 = tok.danger, Visible = false }, icon)
 		self:_corner(fail)
+		local failScale = self:_new("UIScale", {}, fail)
 		self:_label({
 			Size = UDim2.fromScale(1, 1),
 			Text = "!",
 			TextSize = 11,
 			FontFace = F_BOLD,
-			TextColor3 = Color3.new(1, 1, 1),
+			TextColor3 = WHITE,
 			TextXAlignment = Enum.TextXAlignment.Center,
 		}, fail)
 
@@ -581,18 +752,27 @@ function Loading:_build(steps)
 			Name = "Label",
 			Position = UDim2.fromOffset(24, 0),
 			Size = UDim2.new(1, -24, 1, 0),
-			Text = tostring(text),
+			Text = data.name,
 			TextSize = 12,
 			FontFace = F_REG,
 			TextColor3 = tok.tx3,
+			TextTransparency = animate and 1 or 0,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-		}, row)
+		}, content)
 
-		self._steps[i] = { name = tostring(text), icon = icon, done = done, todo = todo, fail = fail, label = label, state = "todo" }
+		data.content = content
+		data.icon = icon
+		data.iconScale = iconScale
+		data.done = done
+		data.doneScale = doneScale
+		data.todo = todo
+		data.fail = fail
+		data.failScale = failScale
+		data.label = label
+		data.state = "todo"
+		self._steps[i] = data
 	end
 
-	-- A single spinner is moved to whichever step is active, so only one
-	-- engine-side tween ever runs.
 	local spinner = self:_frame({
 		Name = "Spinner",
 		AnchorPoint = Vector2.new(0.5, 0.5),
@@ -606,118 +786,177 @@ function Loading:_build(steps)
 	local arc = self:_frame({ Size = UDim2.fromScale(1, 1), BackgroundTransparency = 1 }, spinner)
 	self:_corner(arc)
 	local arcStroke = self:_new("UIStroke", { Color = tok.accent, Thickness = 2, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, arc)
-	local gradient = self:_new("UIGradient", {
+	local arcGradient = self:_new("UIGradient", {
 		Transparency = NumberSequence.new({
 			NumberSequenceKeypoint.new(0, 0),
-			NumberSequenceKeypoint.new(0.499, 0),
-			NumberSequenceKeypoint.new(0.5, 1),
+			NumberSequenceKeypoint.new(0.32, 0),
+			NumberSequenceKeypoint.new(0.62, 1),
 			NumberSequenceKeypoint.new(1, 1),
 		}),
 	}, arcStroke)
 	self._spinner = spinner
-	self._spinTween = TweenService:Create(gradient, SPIN, { Rotation = 360 })
+	self._spinnerScale = self:_new("UIScale", {}, spinner)
+	self._spinTween = self:_loop(arcGradient, self:_info(0.75, Style.Linear, Direction.InOut, -1), { Rotation = 360 })
+end
 
-	-- Footer ------------------------------------------------------------------
-	if hasFooter then
-		local footer = self:_frame({
-			Name = "Footer",
-			LayoutOrder = 4,
-			Size = UDim2.new(1, 0, 0, FOOTER_H),
-			BackgroundTransparency = 1,
-		}, surface)
-		self:_frame({ Name = "Divider", Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = tok.line }, footer)
-		local hint = self:_frame({
-			Name = "Hint",
-			Position = UDim2.fromOffset(0, 15),
-			Size = UDim2.new(1, 0, 0, 22),
-			BackgroundTransparency = 1,
-		}, footer)
-		self:_new("UIListLayout", {
-			FillDirection = Enum.FillDirection.Horizontal,
-			HorizontalAlignment = Enum.HorizontalAlignment.Center,
-			VerticalAlignment = Enum.VerticalAlignment.Center,
-			SortOrder = Enum.SortOrder.LayoutOrder,
-			Padding = UDim.new(0, 6),
-		}, hint)
-		self:_label({
-			LayoutOrder = 1,
-			AutomaticSize = Enum.AutomaticSize.X,
-			Size = UDim2.fromScale(0, 1),
-			Text = opts.HintPrefix or "Press",
-			TextSize = 11,
-			FontFace = F_REG,
-			TextColor3 = tok.tx3,
-		}, hint)
-		local key = self:_new("TextLabel", {
-			LayoutOrder = 2,
-			AutomaticSize = Enum.AutomaticSize.X,
-			Size = UDim2.fromOffset(0, 20),
-			BackgroundColor3 = tok.el,
-			BorderSizePixel = 0,
-			Text = keyLabel(opts.Keybind or Enum.KeyCode.RightShift),
-			TextSize = 11,
-			FontFace = F_MONO,
-			TextColor3 = tok.tx2,
-		}, hint)
-		self:_corner(key, UDim.new(0, 5))
-		self:_new("UIStroke", { Color = tok.line2, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, key)
-		self:_new("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7) }, key)
-		self:_label({
-			LayoutOrder = 3,
-			AutomaticSize = Enum.AutomaticSize.X,
-			Size = UDim2.fromScale(0, 1),
-			Text = opts.HintText or "to show or hide the menu",
-			TextSize = 11,
-			FontFace = F_REG,
-			TextColor3 = tok.tx3,
-		}, hint)
+function Loading:_buildHint(surface)
+	local opts = self._opts
+	local footer = self:_frame({
+		Name = "Footer",
+		LayoutOrder = 4,
+		Size = UDim2.new(1, 0, 0, FOOTER_H),
+		BackgroundTransparency = 1,
+	}, surface)
+	self:_frame({ Name = "Divider", Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = tok.line }, footer)
+
+	local hint = self:_frame({
+		Name = "Hint",
+		Position = UDim2.fromOffset(0, 15),
+		Size = UDim2.new(1, 0, 0, 22),
+		BackgroundTransparency = 1,
+	}, footer)
+	self:_new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 6),
+	}, hint)
+
+	self:_label({
+		LayoutOrder = 1,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromScale(0, 1),
+		Text = tostring(opts.HintPrefix or ""),
+		TextSize = 11,
+		FontFace = F_REG,
+		TextColor3 = tok.tx3,
+		Visible = opts.HintPrefix ~= nil and opts.HintPrefix ~= "",
+	}, hint)
+
+	local key = self:_new("TextLabel", {
+		LayoutOrder = 2,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 20),
+		BackgroundColor3 = tok.el,
+		BorderSizePixel = 0,
+		Text = keyLabel(opts.Keybind),
+		TextSize = 11,
+		FontFace = F_MONO,
+		TextColor3 = tok.tx2,
+	}, hint)
+	self:_corner(key, UDim.new(0, 5))
+	self:_new("UIStroke", { Color = tok.line2, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, key)
+	self:_new("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7) }, key)
+
+	self:_label({
+		LayoutOrder = 3,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromScale(0, 1),
+		Text = tostring(opts.HintText or ""),
+		TextSize = 11,
+		FontFace = F_REG,
+		TextColor3 = tok.tx3,
+		Visible = opts.HintText ~= nil and opts.HintText ~= "",
+	}, hint)
+end
+
+function Loading:_bindViewport()
+	local opts = self._opts
+	local scale = tonumber(opts.Scale) or 1
+	if opts.AutoScale == false then
+		self._fitScale.Scale = scale
+		return
 	end
-
-	self:SetTitle(opts.Title or "EasyLibrary")
-	self:SetSubtitle(opts.Subtitle)
-	self:SetLogo(opts.Logo)
-
-	if opts.Blur then
-		self._blur = self:_new("BlurEffect", { Name = name .. "_Blur", Size = 0 }, Lighting)
-		self:_fade(self._blur, "Size", opts.BlurSize or 12)
-	end
-
-	gui.Parent = parent
-
-	if opts.AutoScale ~= false then
-		local function fit()
-			local camera = Workspace.CurrentCamera
-			if not camera then
-				return
-			end
-			local vs = camera.ViewportSize
-			local s = math.min(1, (vs.X - 32) / WIDTH, (vs.Y - 32) / height)
-			self._fitScale.Scale = math.clamp(s, 0.5, 1) * (opts.Scale or 1)
-		end
-		fit()
+	local function fit()
 		local camera = Workspace.CurrentCamera
-		if camera then
-			self._conns[#self._conns + 1] = camera:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
+		if not camera then
+			return
 		end
-	else
-		self._fitScale.Scale = opts.Scale or 1
+		local size = camera.ViewportSize
+		local s = math.min(1, (size.X - 32) / self._width, (size.Y - 32) / self._height)
+		self._fitScale.Scale = math.clamp(s, 0.5, 1) * scale
+	end
+	fit()
+	local camera = Workspace.CurrentCamera
+	if camera then
+		self._conns[#self._conns + 1] = camera:GetPropertyChangedSignal("ViewportSize"):Connect(fit)
 	end
 end
 
 function Loading:_open()
-	for _, f in ipairs(self._fades) do
-		TweenService:Create(f[1], OPEN, { [f[2]] = f[3] }):Play()
+	local opts = self._opts
+	if self._dim then
+		self:_tween(self._dim, self:_info(0.4, Style.Quad, Direction.Out), { BackgroundTransparency = opts.DimTransparency })
 	end
-	TweenService:Create(self._cardScale, OPEN, { Scale = 1 }):Play()
+	if self._blur then
+		self:_tween(self._blur, self:_info(0.4, Style.Quad, Direction.Out), { Size = opts.BlurSize })
+	end
+
+	if self._animate then
+		self._stack.Position = UDim2.fromOffset(0, 16)
+	end
+	self:_tween(self._stack, self:_info(0.6, Style.Quint, Direction.Out), { Position = UDim2.fromOffset(0, 0) })
+	self:_tween(self._card, self:_info(0.35, Style.Quad, Direction.Out), { GroupTransparency = 0 })
+	for _, sh in ipairs(self._shadows) do
+		self:_tween(sh.frame, self:_info(0.5, Style.Quad, Direction.Out, 0, false, 0.05), { BackgroundTransparency = sh.alpha })
+	end
+	self:_tween(self._logoScale, self:_info(0.55, Style.Back, Direction.Out, 0, false, 0.06), { Scale = 1 })
+
+	for i, st in ipairs(self._steps) do
+		local delay = 0.16 + (i - 1) * 0.05
+		self:_tween(st.content, self:_info(0.5, Style.Quint, Direction.Out, 0, false, delay), { Position = UDim2.fromOffset(0, 0) })
+		self:_tween(st.label, self:_info(0.35, Style.Quad, Direction.Out, 0, false, delay), { TextTransparency = 0 })
+		self:_tween(st.iconScale, self:_info(0.45, Style.Back, Direction.Out, 0, false, delay), { Scale = 1 })
+	end
+
+	if self._shimmerTween then
+		self._shimmerTween:Play()
+	end
 end
 
 function Loading:_close()
-	for _, f in ipairs(self._fades) do
-		local hidden = f[2] == "Size" and 0 or 1
-		TweenService:Create(f[1], CLOSE, { [f[2]] = hidden }):Play()
+	local info = self:_info(0.28, Style.Quad, Direction.In)
+	self:_tween(self._stack, info, { Position = UDim2.fromOffset(0, -12) })
+	self:_tween(self._card, info, { GroupTransparency = 1 })
+	for _, sh in ipairs(self._shadows) do
+		self:_tween(sh.frame, info, { BackgroundTransparency = 1 })
 	end
-	TweenService:Create(self._cardScale, CLOSE, { Scale = 0.96 }):Play()
-	task.wait(CLOSE.Time)
+	if self._dim then
+		self:_tween(self._dim, self:_info(0.32, Style.Quad, Direction.In), { BackgroundTransparency = 1 })
+	end
+	if self._blur then
+		self:_tween(self._blur, self:_info(0.32, Style.Quad, Direction.In), { Size = 0 })
+	end
+	if self._animate then
+		task.wait(0.32 / self._speed)
+	end
+end
+
+function Loading:_shake()
+	if not self._animate then
+		return
+	end
+	task.spawn(function()
+		local offsets = { 7, -6, 4, -3, 1, 0 }
+		local step = 0.045 / self._speed
+		for _, x in ipairs(offsets) do
+			if self._destroyed then
+				return
+			end
+			TweenService:Create(self._stack, TweenInfo.new(step, Style.Quad, Direction.Out), { Position = UDim2.fromOffset(x, 0) }):Play()
+			task.wait(step)
+		end
+	end)
+end
+
+function Loading:_stopLoops()
+	for _, t in ipairs(self._loops) do
+		t:Cancel()
+	end
+	if self._shimmer then
+		self._shimmer.Enabled = false
+	end
 end
 
 function Loading:_indexOf(name)
@@ -738,26 +977,145 @@ function Loading:_setState(st, state)
 	st.todo.Visible = state == "todo"
 	st.fail.Visible = state == "fail"
 
+	if state == "done" and self._animate then
+		st.doneScale.Scale = 0.35
+		self:_tween(st.doneScale, self._pop, { Scale = 1 })
+	elseif state == "fail" and self._animate then
+		st.failScale.Scale = 0.35
+		self:_tween(st.failScale, self._pop, { Scale = 1 })
+	end
+
 	local spinner = self._spinner
 	if state == "now" then
 		spinner.Parent = st.icon
 		spinner.Visible = true
-		self._spinTween:Play()
+		if self._animate then
+			self._spinnerScale.Scale = 0.4
+			self:_tween(self._spinnerScale, self._pop, { Scale = 1 })
+		end
+		if self._spinTween then
+			self._spinTween:Play()
+		end
 	elseif spinner.Parent == st.icon then
 		spinner.Visible = false
-		self._spinTween:Cancel()
+		if self._spinTween then
+			self._spinTween:Cancel()
+		end
 	end
 
-	local color = (state == "done" and "tx2") or (state == "now" and "tx") or (state == "fail" and "danger") or "tx3"
-	self:_bind(st.label, "TextColor3", color)
+	local token = "tx3"
+	if state == "done" then
+		token = "tx2"
+	elseif state == "now" then
+		token = "tx"
+	elseif state == "fail" then
+		token = "danger"
+	end
+	self:_bindTween(st.label, "TextColor3", token)
 end
 
---------------------------------------------------------------------------------
--- Public API (every setter returns self, so calls can be chained)
---------------------------------------------------------------------------------
+function Loading:_tweenProgress(alpha, time, style)
+	if self._destroyed then
+		return
+	end
+	alpha = math.clamp(tonumber(alpha) or 0, 0, 1)
+	self._progress = alpha
+	if self._progressTween then
+		self._progressTween:Cancel()
+		self._progressTween = nil
+	end
+	if not time or time <= 0 or not self._animate then
+		self._value.Value = alpha
+		return
+	end
+	self._progressTween = TweenService:Create(self._value, TweenInfo.new(time, style or Style.Quint, Direction.Out), { Value = alpha })
+	self._progressTween:Play()
+end
+
+function Loading:_alive()
+	return not (self._destroyed or self._finished or self._failed)
+end
+
+function Loading:_fakeDuration(st, totalWeight)
+	local fake = self._fake
+	local d = st.duration
+	if not d and tonumber(fake.Duration) then
+		d = tonumber(fake.Duration) * st.weight / totalWeight
+	end
+	d = d or tonumber(fake.StepDuration) or 1.2
+	local jitter = math.clamp(tonumber(fake.Jitter) or 0, 0, 0.9)
+	if jitter > 0 then
+		d = d * (1 + self._rng:NextNumber(-jitter, jitter))
+	end
+	return math.max(d, 0.05)
+end
+
+function Loading:_runFake()
+	local fake = self._fake
+	local stepped = string.lower(tostring(fake.Style)) == "stepped"
+	local n = #self._steps
+	local totalWeight = 0
+	for _, st in ipairs(self._steps) do
+		totalWeight = totalWeight + st.weight
+	end
+
+	task.wait(math.max(tonumber(fake.StartDelay) or 0, 0))
+
+	for i, st in ipairs(self._steps) do
+		if not self:_alive() then
+			return
+		end
+		self:SetStep(i)
+
+		local duration = self:_fakeDuration(st, totalWeight)
+		local messages = st.messages
+		local count = messages and #messages or 1
+		if stepped then
+			count = math.max(count, self._rng:NextInteger(3, 5))
+		end
+
+		local weights, sum = {}, 0
+		for s = 1, count do
+			local w = stepped and self._rng:NextNumber(0.5, 1.5) or 1
+			weights[s] = w
+			sum = sum + w
+		end
+
+		local from = (i - 1) / n
+		local acc = 0
+		for s = 1, count do
+			if not self:_alive() then
+				return
+			end
+			if messages then
+				self:SetStatus(messages[math.floor((s - 1) / count * #messages) + 1])
+			end
+			acc = acc + weights[s]
+			local target = from + (acc / sum) / n
+			local segment = duration * weights[s] / sum
+			if stepped then
+				task.wait(segment * 0.65)
+				if not self:_alive() then
+					return
+				end
+				self:_tweenProgress(target, 0.2, Style.Quad)
+				task.wait(segment * 0.35)
+			else
+				self:_tweenProgress(target, segment, Style.Linear)
+				task.wait(segment)
+			end
+		end
+	end
+
+	if self:_alive() and self._opts.AutoFinish ~= false then
+		self:Finish()
+	end
+end
 
 function Loading:SetTitle(text)
-	if self._destroyed then return self end
+	if self._destroyed then
+		return self
+	end
 	text = tostring(text or "")
 	self._title.Text = text
 	if not self._logoImage.Visible then
@@ -767,7 +1125,9 @@ function Loading:SetTitle(text)
 end
 
 function Loading:SetSubtitle(text)
-	if self._destroyed then return self end
+	if self._destroyed then
+		return self
+	end
 	local has = text ~= nil and text ~= ""
 	self._subtitle.Visible = has
 	self._subtitle.Text = has and tostring(text) or ""
@@ -776,7 +1136,9 @@ function Loading:SetSubtitle(text)
 end
 
 function Loading:SetLogo(image)
-	if self._destroyed then return self end
+	if self._destroyed then
+		return self
+	end
 	local has = image ~= nil and image ~= ""
 	self._logoImage.Visible = has
 	self._logoImage.Image = has and tostring(image) or ""
@@ -789,7 +1151,9 @@ function Loading:SetLogo(image)
 end
 
 function Loading:SetStatus(text)
-	if self._destroyed then return self end
+	if self._destroyed then
+		return self
+	end
 	self._status.Text = tostring(text or "")
 	if not self._failed then
 		self:_bind(self._status, "TextColor3", "tx2")
@@ -798,19 +1162,7 @@ function Loading:SetStatus(text)
 end
 
 function Loading:SetProgress(alpha, instant)
-	if self._destroyed then return self end
-	alpha = math.clamp(tonumber(alpha) or 0, 0, 1)
-	self._progress = alpha
-	if self._progressTween then
-		self._progressTween:Cancel()
-		self._progressTween = nil
-	end
-	if instant then
-		self._value.Value = alpha
-	else
-		self._progressTween = TweenService:Create(self._value, EASE, { Value = alpha })
-		self._progressTween:Play()
-	end
+	self:_tweenProgress(alpha, (not instant) and (0.3 / self._speed) or 0, Style.Quint)
 	return self
 end
 
@@ -819,7 +1171,9 @@ function Loading:GetProgress()
 end
 
 function Loading:SetStep(index)
-	if self._destroyed or self._finished then return self end
+	if not self:_alive() then
+		return self
+	end
 	if type(index) == "string" then
 		index = self:_indexOf(index)
 	end
@@ -831,7 +1185,13 @@ function Loading:SetStep(index)
 	self._current = index
 
 	for i, st in ipairs(self._steps) do
-		self:_setState(st, (i < index and "done") or (i == index and "now") or "todo")
+		local state = "todo"
+		if i < index then
+			state = "done"
+		elseif i == index then
+			state = "now"
+		end
+		self:_setState(st, state)
 	end
 	self:SetStatus(self._steps[index].name .. "...")
 
@@ -848,37 +1208,57 @@ function Loading:Next()
 	return self:SetStep(self._current + 1)
 end
 
--- Runs one job per step. A job is a function, or { "Name", function } / { Callback = function }.
--- Each job receives (progress, loader): call progress(0..1) for progress inside that step.
-function Loading:Run(jobs)
-	if self._destroyed then
-		return false, "destroyed"
+function Loading:Start()
+	if self._running or not self:_alive() then
+		return self
 	end
+	self._running = true
+	task.spawn(function()
+		self:_runFake()
+		self._running = false
+	end)
+	return self
+end
+
+function Loading:Run(jobs)
+	if not self:_alive() then
+		return false, "inactive"
+	end
+	self._running = true
 	jobs = jobs or {}
 	local n = #self._steps
 
 	for i = 1, n do
 		local job = jobs[i]
-		local fn = (type(job) == "function" and job) or (type(job) == "table" and (job.Callback or job[2])) or nil
+		local fn = nil
+		if type(job) == "function" then
+			fn = job
+		elseif type(job) == "table" then
+			fn = job.Callback or job[2]
+		end
 
 		self:SetStep(i)
-		if fn then
+		if type(fn) == "function" then
 			local function sub(alpha)
-				if self._destroyed then return end
-				self:SetProgress(((i - 1) + math.clamp(tonumber(alpha) or 0, 0, 1)) / n)
+				if self:_alive() then
+					self:SetProgress(((i - 1) + math.clamp(tonumber(alpha) or 0, 0, 1)) / n)
+				end
 			end
 			local ok, err = pcall(fn, sub, self)
 			if not ok then
+				self._running = false
 				self:Fail(tostring(err))
 				return false, err
 			end
 		end
-		if self._destroyed then
-			return false, "destroyed"
+		if not self:_alive() then
+			self._running = false
+			return false, "inactive"
 		end
 		self:SetProgress(i / n)
 	end
 
+	self._running = false
 	if self._opts.AutoFinish ~= false then
 		self:Finish()
 	end
@@ -886,34 +1266,48 @@ function Loading:Run(jobs)
 end
 
 function Loading:Fail(message)
-	if self._destroyed then return self end
+	if self._destroyed or self._finished or self._failed then
+		return self
+	end
 	self._failed = true
+	self:_stopLoops()
+
 	local st = self._steps[self._current]
 	if st then
 		self:_setState(st, "fail")
 	end
-	self._status.Text = tostring(message or "Something went wrong")
-	self:_bind(self._status, "TextColor3", "danger")
-	self:_bind(self._fill, "BackgroundColor3", "danger")
-	self:_bind(self._percent, "TextColor3", "danger")
+	if self._spinner then
+		self._spinner.Visible = false
+	end
+
+	self._status.Text = tostring(message or self._opts.FailText)
+	self:_bindTween(self._status, "TextColor3", "danger")
+	self:_bindTween(self._fill, "BackgroundColor3", "danger")
+	self:_bindTween(self._percent, "TextColor3", "danger")
+	self:_shake()
+	self.Failed:Fire(self._status.Text)
 	return self
 end
 
--- Marks everything done, shows the ready state, fades out and destroys.
--- Yields until it is gone unless noYield is true.
 function Loading:Finish(noYield)
-	if self._destroyed or self._finished then return end
+	if self._destroyed or self._finished then
+		return
+	end
 	self._finished = true
+	self:_stopLoops()
 
 	for _, st in ipairs(self._steps) do
 		self:_setState(st, "done")
 	end
-	self._status.Text = self._opts.ReadyText or "Ready"
-	self:SetProgress(1)
+	self._status.Text = tostring(self._opts.ReadyText or "")
+	self:_bindTween(self._status, "TextColor3", "tx")
+	self:_tweenProgress(1, 0.3 / self._speed, Style.Quint)
 
 	local function close()
-		task.wait(self._opts.FinishDelay or 0.6)
-		if self._destroyed then return end
+		task.wait(math.max(tonumber(self._opts.FinishDelay) or 0, 0))
+		if self._destroyed then
+			return
+		end
 		self:_close()
 		self:Destroy()
 		self.Finished:Fire()
@@ -926,17 +1320,26 @@ function Loading:Finish(noYield)
 	end
 end
 
+function Loading:Wait()
+	if self._destroyed then
+		return
+	end
+	self.Finished:Wait()
+end
+
 function Loading:SetTheme(theme)
-	if self._destroyed then return self end
-	local t = (type(theme) == "table" and theme) or THEMES[theme]
-	if not t then return self end
-	self._theme = t
+	if self._destroyed then
+		return self
+	end
+	self._theme = resolveTheme(theme)
 	self:_applyColors()
 	return self
 end
 
 function Loading:SetAccent(color)
-	if self._destroyed or typeof(color) ~= "Color3" then return self end
+	if self._destroyed or typeof(color) ~= "Color3" then
+		return self
+	end
 	self._accent = color
 	self._onAccent = textOn(color)
 	self:_applyColors()
@@ -944,7 +1347,9 @@ function Loading:SetAccent(color)
 end
 
 function Loading:SetFont(font)
-	if self._destroyed then return self end
+	if self._destroyed then
+		return self
+	end
 	self._family = fontFamily(font)
 	for inst, spec in pairs(self._fonted) do
 		inst.FontFace = self:_fontFor(spec)
@@ -961,23 +1366,35 @@ function Loading:_applyColors()
 end
 
 function Loading:Destroy()
-	if self._destroyed then return end
+	if self._destroyed then
+		return
+	end
 	self._destroyed = true
 
-	if self._progressTween then self._progressTween:Cancel() end
-	if self._spinTween then self._spinTween:Cancel() end
+	if self._progressTween then
+		self._progressTween:Cancel()
+	end
+	self:_stopLoops()
 	for _, conn in ipairs(self._conns) do
 		conn:Disconnect()
 	end
-	if self._blur then self._blur:Destroy() end
-	if self._value then self._value:Destroy() end
-	if self._spinner then self._spinner:Destroy() end
-	if self._gui then self._gui:Destroy() end
+	if self._blur then
+		self._blur:Destroy()
+	end
+	if self._value then
+		self._value:Destroy()
+	end
+	if self._spinner then
+		self._spinner:Destroy()
+	end
+	if self._gui then
+		self._gui:Destroy()
+	end
 
 	table.clear(self._conns)
+	table.clear(self._loops)
 	table.clear(self._themed)
 	table.clear(self._fonted)
-	table.clear(self._fades)
 end
 
 return Loading
