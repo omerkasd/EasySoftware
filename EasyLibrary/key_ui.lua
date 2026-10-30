@@ -60,8 +60,6 @@ local FONTS = {
 
 local TEXTS = {
 	Note = "Keys last 24 hours",
-	Heading = "Enter your key",
-	Description = "A valid key unlocks {title} on this device.",
 	Label = "Key",
 	Placeholder = "XXXX-XXXX-XXXX",
 	Paste = "Paste",
@@ -104,7 +102,6 @@ local DEFAULTS = {
 	SaveKey = true,
 	FileName = "EasyLibrary/key.txt",
 	AutoLoadSaved = true,
-	ShowSidebar = true,
 	ShowCloseButton = true,
 	Draggable = true,
 	AutoFocus = false,
@@ -127,7 +124,7 @@ local DEFAULTS = {
 	OnClose = nil,
 }
 
-local ASIDE_W, FORM_W = 200, 378
+local FORM_W = 416
 local DARK_TEXT = Color3.fromHex("111113")
 local WHITE = Color3.new(1, 1, 1)
 
@@ -598,12 +595,11 @@ end
 function KeyUI:_build()
 	local opts = self._opts
 	local texts = self._texts
-	local showSidebar = opts.ShowSidebar ~= false
 	local hasLink = opts.KeyLink ~= nil and opts.KeyLink ~= ""
 	local hasDiscord = opts.Discord ~= nil and opts.Discord ~= ""
 	local hasButtons = hasLink or hasDiscord
 
-	local x0 = (showSidebar and ASIDE_W or 0) + 22
+	local x0 = 22
 	local rw = FORM_W
 	local width = x0 + rw + 24
 	local innerH = hasButtons and 312 or 236
@@ -684,10 +680,7 @@ function KeyUI:_build()
 	self:_corner(surface, UDim.new(0, 11))
 	self._surface = surface
 
-	if showSidebar then
-		self:_buildAside(surface)
-	end
-	self:_buildForm(surface, x0, rw, showSidebar, hasLink, hasDiscord)
+	self:_buildForm(surface, x0, rw, hasLink, hasDiscord)
 
 	local strip = self:_frame({
 		Name = "Strip",
@@ -708,102 +701,6 @@ function KeyUI:_build()
 	self:_bindViewport()
 	if opts.Draggable ~= false then
 		self:_bindDrag(surface)
-	end
-end
-
-function KeyUI:_buildAside(surface)
-	local opts = self._opts
-	local texts = self._texts
-
-	local aside = self:_frame({
-		Name = "Aside",
-		Size = UDim2.new(0, ASIDE_W, 1, 0),
-		BackgroundColor3 = tok.side,
-	}, surface)
-	self:_corner(aside, UDim.new(0, 11))
-	self:_frame({
-		Name = "Square",
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.new(0, 14, 1, 0),
-		BackgroundColor3 = tok.side,
-	}, aside)
-	self:_frame({
-		Name = "Edge",
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.new(0, 1, 1, 0),
-		BackgroundColor3 = tok.line,
-	}, aside)
-
-	local hasNote = texts.Note ~= nil and texts.Note ~= ""
-	local hasSubtitle = opts.Subtitle ~= nil and opts.Subtitle ~= ""
-	local hidden = self._animate and 1 or 0
-
-	local brand = self:_frame({
-		Name = "Brand",
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, hasNote and -23 or 0),
-		Size = UDim2.new(1, -32, 0, 0),
-		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundTransparency = 1,
-	}, aside)
-	self:_new("UIListLayout", {
-		FillDirection = Enum.FillDirection.Vertical,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 4),
-	}, brand)
-
-	local logo = self:_buildLogo(brand, UDim2.new(), 56, 14, 28)
-	logo.LayoutOrder = 1
-	self:_frame({ LayoutOrder = 2, Size = UDim2.fromOffset(1, 10), BackgroundTransparency = 1 }, brand)
-
-	self._brandLabels[#self._brandLabels + 1] = self:_label({
-		Name = "Title",
-		LayoutOrder = 3,
-		Size = UDim2.new(1, 0, 0, 20),
-		Text = tostring(opts.Title or ""),
-		TextSize = 16,
-		FontFace = F_SEMI,
-		TextColor3 = tok.tx,
-		TextXAlignment = Enum.TextXAlignment.Center,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-		TextTransparency = hidden,
-	}, brand)
-
-	if hasSubtitle then
-		self._brandLabels[#self._brandLabels + 1] = self:_label({
-			Name = "Subtitle",
-			LayoutOrder = 4,
-			Size = UDim2.new(1, 0, 0, 15),
-			Text = tostring(opts.Subtitle),
-			TextSize = 12,
-			FontFace = F_REG,
-			TextColor3 = tok.tx3,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			TextTransparency = hidden,
-		}, brand)
-	end
-
-	if hasNote then
-		self:_frame({
-			Position = UDim2.new(0, 20, 1, -46),
-			Size = UDim2.new(1, -40, 0, 1),
-			BackgroundColor3 = tok.line,
-		}, aside)
-		local clock = self:_iconBox(14, UDim2.new(0, 20, 1, -25), nil, aside)
-		self:_iconClock(clock, "tx3")
-		self:_label({
-			Position = UDim2.new(0, 41, 1, -32),
-			Size = UDim2.new(1, -61, 0, 14),
-			Text = tostring(texts.Note),
-			TextSize = 11,
-			FontFace = F_REG,
-			TextColor3 = tok.tx3,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-		}, aside)
 	end
 end
 
@@ -843,38 +740,41 @@ function KeyUI:_buildLogo(parent, position, size, radius, letterSize)
 	return logo
 end
 
-function KeyUI:_buildForm(surface, x0, rw, showSidebar, hasLink, hasDiscord)
+function KeyUI:_buildForm(surface, x0, rw, hasLink, hasDiscord)
 	local opts = self._opts
 	local texts = self._texts
-	local vars = { title = tostring(opts.Title or "") }
+	local hasSubtitle = opts.Subtitle ~= nil and opts.Subtitle ~= ""
+	local hidden = self._animate and 1 or 0
+	local headX = x0 + 52
+	local headW = rw - 52 - (opts.ShowCloseButton ~= false and 30 or 0)
 
-	local headX = x0
-	if not showSidebar then
-		self:_buildLogo(surface, UDim2.fromOffset(x0, 20), 32, 9, 16)
-		headX = x0 + 44
-	end
-	local closeRoom = opts.ShowCloseButton ~= false and 30 or 0
+	self:_buildLogo(surface, UDim2.fromOffset(x0, 20), 40, 10, 20)
 
-	self:_label({
-		Name = "Heading",
-		Position = UDim2.fromOffset(headX, 18),
-		Size = UDim2.fromOffset(rw - (headX - x0) - closeRoom, 24),
-		Text = tostring(texts.Heading or ""),
+	self._brandLabels[#self._brandLabels + 1] = self:_label({
+		Name = "Title",
+		Position = UDim2.fromOffset(headX, hasSubtitle and 21 or 29),
+		Size = UDim2.fromOffset(headW, 22),
+		Text = tostring(opts.Title or ""),
 		TextSize = 17,
 		FontFace = F_SEMI,
 		TextColor3 = tok.tx,
 		TextTruncate = Enum.TextTruncate.AtEnd,
+		TextTransparency = hidden,
 	}, surface)
-	self:_label({
-		Name = "Description",
-		Position = UDim2.fromOffset(headX, 44),
-		Size = UDim2.fromOffset(rw - (headX - x0), 18),
-		Text = fmt(texts.Description, vars),
-		TextSize = 12,
-		FontFace = F_REG,
-		TextColor3 = tok.tx2,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, surface)
+
+	if hasSubtitle then
+		self._brandLabels[#self._brandLabels + 1] = self:_label({
+			Name = "Subtitle",
+			Position = UDim2.fromOffset(headX, 43),
+			Size = UDim2.fromOffset(headW, 16),
+			Text = tostring(opts.Subtitle),
+			TextSize = 12,
+			FontFace = F_REG,
+			TextColor3 = tok.tx3,
+			TextTruncate = Enum.TextTruncate.AtEnd,
+			TextTransparency = hidden,
+		}, surface)
+	end
 
 	if opts.ShowCloseButton ~= false then
 		local close = self:_button({
@@ -906,6 +806,35 @@ function KeyUI:_buildForm(surface, x0, rw, showSidebar, hasLink, hasDiscord)
 		FontFace = F_REG,
 		TextColor3 = tok.tx2,
 	}, surface)
+
+	if texts.Note ~= nil and texts.Note ~= "" then
+		local note = self:_frame({
+			Name = "Note",
+			AnchorPoint = Vector2.new(1, 0),
+			Position = UDim2.fromOffset(x0 + rw, 78),
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 16),
+			BackgroundTransparency = 1,
+		}, surface)
+		self:_new("UIListLayout", {
+			FillDirection = Enum.FillDirection.Horizontal,
+			VerticalAlignment = Enum.VerticalAlignment.Center,
+			SortOrder = Enum.SortOrder.LayoutOrder,
+			Padding = UDim.new(0, 6),
+		}, note)
+		local clock = self:_iconBox(14, UDim2.new(), Vector2.new(0, 0), note)
+		clock.LayoutOrder = 1
+		self:_iconClock(clock, "tx3")
+		self:_label({
+			LayoutOrder = 2,
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 16),
+			Text = tostring(texts.Note),
+			TextSize = 11,
+			FontFace = F_REG,
+			TextColor3 = tok.tx3,
+		}, note)
+	end
 
 	self:_buildField(surface, x0, rw)
 	self:_buildStatus(surface, x0, rw)
