@@ -3,6 +3,7 @@ local TweenService = game:GetService("TweenService")
 local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local GuiService = game:GetService("GuiService")
 
 local function defaultParent()
 	if typeof(gethui) == "function" then
@@ -100,6 +101,7 @@ local TEXTS = {
 	Discord = "Join Discord",
 	DiscordCopied = "Invite copied",
 	CopyFallback = "Copy this link: {link}",
+	ReopenMobile = "Tap to open",
 }
 
 local DEFAULTS = {
@@ -128,8 +130,11 @@ local DEFAULTS = {
 	DimTransparency = 0.45,
 	Blur = false,
 	BlurSize = 12,
+	Device = "Auto",
+	ReopenKey = Enum.KeyCode.RightShift,
 	AutoScale = true,
 	Scale = 1,
+	MobileScale = 1,
 	Name = "EasyLibrary_Key",
 	Parent = nil,
 	DisplayOrder = 2147482999,
@@ -144,6 +149,18 @@ local DEFAULTS = {
 
 local FORM_W = 416
 local DARK_TEXT = Color3.fromHex("111113")
+local KEY_NAMES = {
+	RightShift = "RShift",
+	LeftShift = "LShift",
+	RightControl = "RCtrl",
+	LeftControl = "LCtrl",
+	RightAlt = "RAlt",
+	LeftAlt = "LAlt",
+	Insert = "Ins",
+	Delete = "Del",
+	PageUp = "PgUp",
+	PageDown = "PgDn",
+}
 local WHITE = Color3.new(1, 1, 1)
 
 local Style = Enum.EasingStyle
@@ -204,6 +221,26 @@ local function fontFamily(f)
 		return Font.fromEnum(f).Family
 	end
 	return Font.fromEnum(FONTS[f] or Enum.Font.Ubuntu).Family
+end
+
+local function detectDevice(preference)
+	local p = string.lower(tostring(preference or "Auto"))
+	if p == "mobile" then
+		return "Mobile"
+	elseif p == "pc" then
+		return "PC"
+	end
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled then
+		return "Mobile"
+	end
+	return "PC"
+end
+
+local function keyLabel(k)
+	if typeof(k) == "EnumItem" then
+		k = k.Name
+	end
+	return KEY_NAMES[k] or tostring(k)
 end
 
 local function merge(base, over)
@@ -294,6 +331,9 @@ function KeyUI.new(options)
 	local opts = merge(DEFAULTS, options)
 	local self = setmetatable({}, KeyUI)
 	self._opts = opts
+	self.Device = detectDevice(opts.Device)
+	self._mobile = self.Device == "Mobile"
+	self._hidden = false
 	self._texts = merge(TEXTS, opts.Texts)
 	self._theme = resolveTheme(opts.Theme)
 	self._accent = typeof(opts.Accent) == "Color3" and opts.Accent or DEFAULTS.Accent
@@ -601,6 +641,9 @@ function KeyUI:_press(button)
 end
 
 function KeyUI:_hover(button, onHover)
+	if self._mobile then
+		return
+	end
 	self:_connect(button.MouseEnter, function()
 		onHover(true)
 	end)
@@ -698,6 +741,8 @@ function KeyUI:_build()
 	self._strip = strip
 	self._stripFill = self:_frame({ Size = UDim2.fromScale(0, 1), BackgroundColor3 = tok.ok, ZIndex = 5 }, strip)
 
+	self:_buildReopen(gui)
+
 	if opts.Blur then
 		self._blur = self:_new("BlurEffect", { Name = opts.Name .. "_Blur", Size = 0 }, Lighting)
 	end
@@ -785,8 +830,8 @@ function KeyUI:_buildForm(surface, x0, rw, hasLink, hasDiscord)
 		local close = self:_button({
 			Name = "Close",
 			AnchorPoint = Vector2.new(1, 0),
-			Position = UDim2.new(1, -12, 0, 12),
-			Size = UDim2.fromOffset(28, 28),
+			Position = self._mobile and UDim2.new(1, -6, 0, 6) or UDim2.new(1, -12, 0, 12),
+			Size = self._mobile and UDim2.fromOffset(40, 40) or UDim2.fromOffset(28, 28),
 			BackgroundColor3 = tok.el,
 			BackgroundTransparency = 1,
 		}, surface)
@@ -798,7 +843,7 @@ function KeyUI:_buildForm(surface, x0, rw, hasLink, hasDiscord)
 		end)
 		self:_press(close)
 		self:_connect(close.Activated, function()
-			self:Close()
+			self:Hide()
 		end)
 	end
 
@@ -957,7 +1002,7 @@ function KeyUI:_buildField(surface, x0, rw)
 		Name = "Clear",
 		AnchorPoint = Vector2.new(1, 0.5),
 		Position = UDim2.new(1, -79, 0.5, 0),
-		Size = UDim2.fromOffset(24, 24),
+		Size = self._mobile and UDim2.fromOffset(32, 32) or UDim2.fromOffset(24, 24),
 		BackgroundColor3 = tok.el2,
 		BackgroundTransparency = 1,
 		Visible = false,
@@ -1193,25 +1238,109 @@ end
 
 function KeyUI:_bindViewport()
 	local opts = self._opts
-	local scale = tonumber(opts.Scale) or 1
-	if opts.AutoScale == false then
-		self._fitScale.Scale = scale
-		return
-	end
+	local base = tonumber(self._mobile and opts.MobileScale or opts.Scale) or 1
+	local margin = self._mobile and 10 or 24
 	local function fit()
 		local camera = Workspace.CurrentCamera
 		if not camera then
 			return
 		end
 		local size = camera.ViewportSize
-		local s = math.min(1, (size.X - 24) / self._width, (size.Y - 24) / self._height)
-		self._fitScale.Scale = math.clamp(s, 0.45, 1) * scale
+		local top = GuiService:GetGuiInset().Y
+		local s = base
+		if opts.AutoScale ~= false then
+			s = math.min(base, (size.X - margin * 2) / self._width, (size.Y - top - margin * 2) / self._height)
+		end
+		self._fitScale.Scale = math.max(s, 0.3)
+		self._reopenScale.Scale = math.min(base, 1)
+		self._reopen.Position = UDim2.new(0.5, 0, 0, self._hidden and (top + 10) or -80)
 	end
+	self._holder.Position = UDim2.new(0.5, 0, 0.5, math.floor(GuiService:GetGuiInset().Y / 2))
 	fit()
 	local camera = Workspace.CurrentCamera
 	if camera then
 		self:_connect(camera:GetPropertyChangedSignal("ViewportSize"), fit)
 	end
+end
+
+function KeyUI:_buildReopen(gui)
+	local opts = self._opts
+	local pill = self:_button({
+		Name = "Reopen",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, -80),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, self._mobile and 42 or 36),
+		BackgroundColor3 = tok.bg,
+		Visible = false,
+	}, gui)
+	self:_corner(pill, UDim.new(0, 10))
+	self:_stroke(pill, "line2", 1)
+	self._reopenScale = self:_new("UIScale", {}, pill)
+	self:_new("UIPadding", { PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 12) }, pill)
+	self:_new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Horizontal,
+		VerticalAlignment = Enum.VerticalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 10),
+	}, pill)
+
+	local logo = self:_buildLogo(pill, UDim2.new(), 22, 6, 12)
+	logo.LayoutOrder = 1
+	self:_label({
+		LayoutOrder = 2,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 18),
+		Text = tostring(opts.Title or ""),
+		TextSize = 13,
+		FontFace = F_SEMI,
+		TextColor3 = tok.tx,
+	}, pill)
+	self:_frame({ LayoutOrder = 3, Size = UDim2.fromOffset(1, 14), BackgroundColor3 = tok.line2 }, pill)
+
+	if self._mobile then
+		self:_label({
+			LayoutOrder = 4,
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 18),
+			Text = tostring(self._texts.ReopenMobile or ""),
+			TextSize = 12,
+			FontFace = F_REG,
+			TextColor3 = tok.tx2,
+		}, pill)
+	else
+		local key = self:_new("TextLabel", {
+			LayoutOrder = 4,
+			AutomaticSize = Enum.AutomaticSize.X,
+			Size = UDim2.fromOffset(0, 20),
+			BackgroundColor3 = tok.el,
+			BorderSizePixel = 0,
+			Text = keyLabel(opts.ReopenKey),
+			TextSize = 11,
+			FontFace = F_MONO,
+			TextColor3 = tok.tx2,
+		}, pill)
+		self:_corner(key, UDim.new(0, 5))
+		self:_stroke(key, "line2", 1)
+		self:_new("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7) }, key)
+	end
+
+	self:_hover(pill, function(on)
+		self:_bindTween(pill, "BackgroundColor3", on and "el" or "bg")
+	end)
+	self:_press(pill)
+	self:_connect(pill.Activated, function()
+		self:Show()
+	end)
+	self:_connect(UserInputService.InputBegan, function(input, processed)
+		if processed or not self._hidden or self._mobile then
+			return
+		end
+		if opts.ReopenKey and input.KeyCode == opts.ReopenKey then
+			self:Show()
+		end
+	end)
+	self._reopen = pill
 end
 
 function KeyUI:_bindDrag(handle)
@@ -1660,6 +1789,49 @@ function KeyUI:_finish(key, direction)
 		self.Closed:Fire()
 	end
 	self.Done:Fire(key)
+end
+
+function KeyUI:Hide()
+	if self._destroyed or self._done or self._hidden or self._state == "valid" then
+		return self
+	end
+	self._hidden = true
+	self._box:ReleaseFocus()
+	task.spawn(function()
+		self:_close("down")
+		if self._destroyed or not self._hidden then
+			return
+		end
+		self._holder.Visible = false
+		if self._dim then
+			self._dim.Visible = false
+		end
+		local pill = self._reopen
+		pill.Position = UDim2.new(0.5, 0, 0, -80)
+		pill.Visible = true
+		self:_tween(pill, self._pop, { Position = UDim2.new(0.5, 0, 0, GuiService:GetGuiInset().Y + 10) })
+	end)
+	return self
+end
+
+function KeyUI:Show()
+	if self._destroyed or self._done or not self._hidden then
+		return self
+	end
+	self._hidden = false
+	local pill = self._reopen
+	self:_tween(pill, self:_info(0.22, Style.Quad, Direction.In), { Position = UDim2.new(0.5, 0, 0, -80) })
+	task.delay(0.22 / self._speed, function()
+		if not self._hidden and pill.Parent then
+			pill.Visible = false
+		end
+	end)
+	self._holder.Visible = true
+	if self._dim then
+		self._dim.Visible = true
+	end
+	self:_open()
+	return self
 end
 
 function KeyUI:Close()
