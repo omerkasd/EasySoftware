@@ -2,6 +2,8 @@ local Players = game:GetService("Players")
 local TweenService = game:GetService("TweenService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
+local GuiService = game:GetService("GuiService")
+local UserInputService = game:GetService("UserInputService")
 
 local function defaultParent()
 	if typeof(gethui) == "function" then
@@ -73,19 +75,6 @@ local FONTS = {
 	["Gotham"] = Enum.Font.Gotham,
 }
 
-local KEY_NAMES = {
-	RightShift = "RShift",
-	LeftShift = "LShift",
-	RightControl = "RCtrl",
-	LeftControl = "LCtrl",
-	RightAlt = "RAlt",
-	LeftAlt = "LAlt",
-	Insert = "Ins",
-	Delete = "Del",
-	PageUp = "PgUp",
-	PageDown = "PgDn",
-}
-
 local DEFAULTS = {
 	Title = "EasyLibrary",
 	Subtitle = nil,
@@ -95,22 +84,20 @@ local DEFAULTS = {
 	Font = "Ubuntu",
 	Mode = "Real",
 	Steps = { "Checking environment", "Loading modules", "Building interface", "Applying config" },
-	Keybind = Enum.KeyCode.RightShift,
-	HintPrefix = "Press",
-	HintText = "to show or hide the menu",
 	ReadyText = "Ready",
 	FailText = "Something went wrong",
 	Width = 380,
 	ShowSubtitle = true,
 	ShowPercent = true,
 	ShowSteps = true,
-	ShowHint = true,
 	Dim = true,
 	DimTransparency = 0.45,
 	Blur = false,
 	BlurSize = 12,
+	Device = "Auto",
 	AutoScale = true,
 	Scale = 1,
+	MobileScale = 1,
 	Name = "EasyLibrary_Loading",
 	Parent = nil,
 	DisplayOrder = 2147483000,
@@ -136,7 +123,7 @@ local FAKE_DEFAULTS = {
 }
 
 local PAD_X, PAD_TOP, PAD_BOTTOM, GAP = 24, 28, 20, 22
-local HEADER_H, PROGRESS_H, FOOTER_H = 44, 30, 37
+local HEADER_H, PROGRESS_H = 44, 30
 local ROW_H, ROW_GAP, BOX_PAD_Y = 24, 2, 8
 local DARK_TEXT = Color3.fromHex("111113")
 local WHITE = Color3.new(1, 1, 1)
@@ -192,11 +179,17 @@ local function fontFamily(f)
 	return Font.fromEnum(FONTS[f] or Enum.Font.Ubuntu).Family
 end
 
-local function keyLabel(k)
-	if typeof(k) == "EnumItem" then
-		k = k.Name
+local function detectDevice(preference)
+	local p = string.lower(tostring(preference or "Auto"))
+	if p == "mobile" then
+		return "Mobile"
+	elseif p == "pc" then
+		return "PC"
 	end
-	return KEY_NAMES[k] or tostring(k)
+	if UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled and not UserInputService.MouseEnabled then
+		return "Mobile"
+	end
+	return "PC"
 end
 
 local function merge(base, over)
@@ -288,12 +281,10 @@ Loading.Fonts = FONTS
 
 function Loading.new(options)
 	local opts = merge(DEFAULTS, options)
-	if opts.Keybind == false then
-		opts.ShowHint = false
-	end
 
 	local self = setmetatable({}, Loading)
 	self._opts = opts
+	self.Device = detectDevice(opts.Device)
 	self._fake = merge(FAKE_DEFAULTS, opts.Fake)
 	self._theme = resolveTheme(opts.Theme)
 	self._accent = typeof(opts.Accent) == "Color3" and opts.Accent or DEFAULTS.Accent
@@ -449,9 +440,6 @@ function Loading:_build(steps)
 	if showSteps then
 		height = height + GAP + stepsH
 	end
-	if opts.ShowHint then
-		height = height + GAP + FOOTER_H
-	end
 	self._height = height
 
 	local parent = opts.Parent or defaultParent()
@@ -487,6 +475,7 @@ function Loading:_build(steps)
 		Size = UDim2.fromOffset(0, 0),
 		BackgroundTransparency = 1,
 	}, gui)
+	self._holder = holder
 	self._fitScale = self:_new("UIScale", {}, holder)
 
 	local stack = self:_frame({
@@ -531,9 +520,6 @@ function Loading:_build(steps)
 	self:_buildHeader(surface)
 	self:_buildProgress(surface)
 	self:_buildSteps(surface, steps, stepsH, showSteps)
-	if opts.ShowHint then
-		self:_buildHint(surface)
-	end
 
 	self:SetTitle(opts.Title)
 	self:SetSubtitle(opts.ShowSubtitle ~= false and opts.Subtitle or nil)
@@ -803,83 +789,24 @@ function Loading:_buildSteps(surface, steps, stepsH, visible)
 	self._spinTween = self:_loop(arcGradient, self:_info(0.75, Style.Linear, Direction.InOut, -1), { Rotation = 360 })
 end
 
-function Loading:_buildHint(surface)
-	local opts = self._opts
-	local footer = self:_frame({
-		Name = "Footer",
-		LayoutOrder = 4,
-		Size = UDim2.new(1, 0, 0, FOOTER_H),
-		BackgroundTransparency = 1,
-	}, surface)
-	self:_frame({ Name = "Divider", Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = tok.line }, footer)
-
-	local hint = self:_frame({
-		Name = "Hint",
-		Position = UDim2.fromOffset(0, 15),
-		Size = UDim2.new(1, 0, 0, 22),
-		BackgroundTransparency = 1,
-	}, footer)
-	self:_new("UIListLayout", {
-		FillDirection = Enum.FillDirection.Horizontal,
-		HorizontalAlignment = Enum.HorizontalAlignment.Center,
-		VerticalAlignment = Enum.VerticalAlignment.Center,
-		SortOrder = Enum.SortOrder.LayoutOrder,
-		Padding = UDim.new(0, 6),
-	}, hint)
-
-	self:_label({
-		LayoutOrder = 1,
-		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromScale(0, 1),
-		Text = tostring(opts.HintPrefix or ""),
-		TextSize = 11,
-		FontFace = F_REG,
-		TextColor3 = tok.tx3,
-		Visible = opts.HintPrefix ~= nil and opts.HintPrefix ~= "",
-	}, hint)
-
-	local key = self:_new("TextLabel", {
-		LayoutOrder = 2,
-		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromOffset(0, 20),
-		BackgroundColor3 = tok.el,
-		BorderSizePixel = 0,
-		Text = keyLabel(opts.Keybind),
-		TextSize = 11,
-		FontFace = F_MONO,
-		TextColor3 = tok.tx2,
-	}, hint)
-	self:_corner(key, UDim.new(0, 5))
-	self:_new("UIStroke", { Color = tok.line2, Thickness = 1, ApplyStrokeMode = Enum.ApplyStrokeMode.Border }, key)
-	self:_new("UIPadding", { PaddingLeft = UDim.new(0, 7), PaddingRight = UDim.new(0, 7) }, key)
-
-	self:_label({
-		LayoutOrder = 3,
-		AutomaticSize = Enum.AutomaticSize.X,
-		Size = UDim2.fromScale(0, 1),
-		Text = tostring(opts.HintText or ""),
-		TextSize = 11,
-		FontFace = F_REG,
-		TextColor3 = tok.tx3,
-		Visible = opts.HintText ~= nil and opts.HintText ~= "",
-	}, hint)
-end
-
 function Loading:_bindViewport()
 	local opts = self._opts
-	local scale = tonumber(opts.Scale) or 1
-	if opts.AutoScale == false then
-		self._fitScale.Scale = scale
-		return
-	end
+	local mobile = self.Device == "Mobile"
+	local base = tonumber(mobile and opts.MobileScale or opts.Scale) or 1
+	local margin = mobile and 10 or 24
 	local function fit()
 		local camera = Workspace.CurrentCamera
 		if not camera then
 			return
 		end
 		local size = camera.ViewportSize
-		local s = math.min(1, (size.X - 32) / self._width, (size.Y - 32) / self._height)
-		self._fitScale.Scale = math.clamp(s, 0.5, 1) * scale
+		local top = GuiService:GetGuiInset().Y
+		local s = base
+		if opts.AutoScale ~= false then
+			s = math.min(base, (size.X - margin * 2) / self._width, (size.Y - top - margin * 2) / self._height)
+		end
+		self._fitScale.Scale = math.max(s, 0.3)
+		self._holder.Position = UDim2.new(0.5, 0, 0.5, math.floor(top / 2))
 	end
 	fit()
 	local camera = Workspace.CurrentCamera
