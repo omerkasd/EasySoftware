@@ -4,6 +4,26 @@ local UserInputService = game:GetService("UserInputService")
 local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 
+local function defaultParent()
+	if typeof(gethui) == "function" then
+		local ok, container = pcall(gethui)
+		if ok and typeof(container) == "Instance" then
+			return container
+		end
+	end
+	local ok, core = pcall(function()
+		local service = game:GetService("CoreGui")
+		local probe = Instance.new("Folder")
+		probe.Parent = service
+		probe:Destroy()
+		return service
+	end)
+	if ok and core then
+		return core
+	end
+	return Players.LocalPlayer:WaitForChild("PlayerGui")
+end
+
 local THEMES = {
 	Dark = {
 		bg = Color3.fromHex("0C0C0E"),
@@ -18,7 +38,6 @@ local THEMES = {
 		tx3 = Color3.fromHex("85858F"),
 		danger = Color3.fromHex("FF6B6B"),
 		ok = Color3.fromHex("3DCB7A"),
-		shadow = Color3.fromHex("000000"),
 	},
 	Light = {
 		bg = Color3.fromHex("F4F4F2"),
@@ -33,7 +52,6 @@ local THEMES = {
 		tx3 = Color3.fromHex("686871"),
 		danger = Color3.fromHex("C93439"),
 		ok = Color3.fromHex("1F9D57"),
-		shadow = Color3.fromHex("14181F"),
 	},
 }
 
@@ -114,7 +132,7 @@ local DEFAULTS = {
 	Scale = 1,
 	Name = "EasyLibrary_Key",
 	Parent = nil,
-	DisplayOrder = 1001,
+	DisplayOrder = 2147482999,
 	ReplaceExisting = true,
 	SuccessDelay = 1.2,
 	Animations = true,
@@ -290,7 +308,6 @@ function KeyUI.new(options)
 	self._fonted = {}
 	self._conns = {}
 	self._loops = {}
-	self._shadows = {}
 	self._brandLabels = {}
 	self._state = "idle"
 	self._attempts = 0
@@ -606,7 +623,7 @@ function KeyUI:_build()
 	local height = innerH + 2
 	self._width, self._height = width, height
 
-	local parent = opts.Parent or Players.LocalPlayer:WaitForChild("PlayerGui")
+	local parent = opts.Parent or defaultParent()
 	if opts.ReplaceExisting ~= false then
 		local old = parent:FindFirstChild(opts.Name)
 		if old then
@@ -646,18 +663,6 @@ function KeyUI:_build()
 	local stack = self:_frame({ Name = "Stack", Size = UDim2.fromOffset(0, 0), BackgroundTransparency = 1 }, holder)
 	self._stack = stack
 
-	for i, spec in ipairs({ { 22, 16, 0.88 }, { 10, 8, 0.8 } }) do
-		local shadow = self:_frame({
-			Name = "Shadow" .. i,
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromOffset(0, spec[2]),
-			Size = UDim2.fromOffset(width + spec[1], height + spec[1]),
-			BackgroundColor3 = tok.shadow,
-			BackgroundTransparency = 1,
-		}, stack)
-		self:_corner(shadow, UDim.new(0, 12 + math.floor(spec[1] / 2)))
-		self._shadows[i] = { frame = shadow, alpha = spec[3] }
-	end
 
 	local card = self:_new("CanvasGroup", {
 		Name = "Card",
@@ -1262,9 +1267,6 @@ function KeyUI:_open()
 	end
 	self:_tween(self._stack, self:_info(0.6, Style.Quint, Direction.Out), { Position = UDim2.fromOffset(0, 0) })
 	self:_tween(self._card, self:_info(0.35, Style.Quad, Direction.Out), { GroupTransparency = 0 })
-	for _, sh in ipairs(self._shadows) do
-		self:_tween(sh.frame, self:_info(0.5, Style.Quad, Direction.Out, 0, false, 0.05), { BackgroundTransparency = sh.alpha })
-	end
 	for _, s in ipairs(self._logoScales or {}) do
 		self:_tween(s, self:_info(0.55, Style.Back, Direction.Out, 0, false, 0.06), { Scale = 1 })
 	end
@@ -1280,9 +1282,6 @@ function KeyUI:_close(direction)
 	local info = self:_info(0.28, Style.Quad, Direction.In)
 	self:_tween(self._stack, info, { Position = UDim2.fromOffset(0, direction == "up" and -12 or 12) })
 	self:_tween(self._card, info, { GroupTransparency = 1 })
-	for _, sh in ipairs(self._shadows) do
-		self:_tween(sh.frame, info, { BackgroundTransparency = 1 })
-	end
 	if self._dim then
 		self:_tween(self._dim, self:_info(0.32, Style.Quad, Direction.In), { BackgroundTransparency = 1 })
 	end
