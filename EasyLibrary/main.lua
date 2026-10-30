@@ -176,8 +176,12 @@ local S = {
 	fontName = "Ubuntu",
 	family = Font.fromEnum(Enum.Font.Ubuntu).Family,
 	mono = Font.fromEnum(Enum.Font.RobotoMono).Family,
-	themed = setmetatable({}, { __mode = "k" }),
-	fonted = setmetatable({}, { __mode = "k" }),
+	themed = {},
+	fonted = {},
+	records = 0,
+	pruneQueued = false,
+	lucide = nil,
+	iconCache = {},
 	conns = {},
 	drags = {},
 	unload = {},
@@ -436,11 +440,34 @@ local function color(token)
 	return S.theme[token] or THEMES.Dark[token] or WHITE
 end
 
+local function prune()
+	S.pruneQueued = false
+	for inst in pairs(S.themed) do
+		if inst.Parent == nil then
+			S.themed[inst] = nil
+		end
+	end
+	for inst in pairs(S.fonted) do
+		if inst.Parent == nil then
+			S.fonted[inst] = nil
+		end
+	end
+end
+
+local function tally()
+	S.records = S.records + 1
+	if S.records % 1500 == 0 and not S.pruneQueued then
+		S.pruneQueued = true
+		task.defer(prune)
+	end
+end
+
 local function record(inst, prop, token)
 	local map = S.themed[inst]
 	if not map then
 		map = {}
 		S.themed[inst] = map
+		tally()
 	end
 	map[prop] = token
 end
@@ -484,6 +511,9 @@ local function new(class, props, parent)
 			if v.__tok then
 				bind(inst, k, v.__tok)
 			elseif v.__font then
+				if not S.fonted[inst] then
+					tally()
+				end
 				S.fonted[inst] = v
 				inst[k] = fontFor(v)
 			end
@@ -632,6 +662,10 @@ local function track(target, handlers)
 		entry.finish = finish
 		entry.move = UserInputService.InputChanged:Connect(function(change)
 			if change == input or (t == MB1 and change.UserInputType == MOVE) then
+				if target.Parent == nil then
+					finish()
+					return
+				end
 				if handlers.move then
 					handlers.move(pointer(change))
 				end
@@ -835,6 +869,104 @@ for name in pairs(ICONS) do
 end
 table.sort(Library.Icons)
 
+local LUCIDE_URL = "https://github.com/latte-soft/lucide-roblox/releases/download/0.1.3/lucide-roblox.luau"
+local LUCIDE_CACHE = "EasyLibrary/cache/lucide-roblox-0.1.3.luau"
+
+local LUCIDE_ALIAS = {
+	grid = "layout-grid",
+	target = "crosshair",
+	sword = "swords",
+	bolt = "zap",
+	close = "x",
+	minimize = "minus",
+	chevron = "chevron-down",
+	alert = "circle-alert",
+	trash = "trash-2",
+}
+
+local BUILTIN_ALIAS = {
+	["sliders-horizontal"] = "settings",
+	["layout-grid"] = "grid",
+	crosshair = "target",
+	swords = "sword",
+	zap = "bolt",
+	x = "close",
+	["chevron-down"] = "chevron",
+	["circle-alert"] = "alert",
+	["trash-2"] = "trash",
+}
+
+local function ensureFolder(path)
+	if not api.isfolder or not api.makefolder then
+		return
+	end
+	local current = ""
+	for part in string.gmatch(path, "[^/]+") do
+		current = current == "" and part or (current .. "/" .. part)
+		local ok, exists = pcall(api.isfolder, current)
+		if ok and not exists then
+			pcall(api.makefolder, current)
+		end
+	end
+end
+
+local function loadLucide()
+	if S.lucide ~= nil then
+		return S.lucide
+	end
+	S.lucide = false
+	local source
+	if api.isfile and api.readfile then
+		local ok, exists = pcall(api.isfile, LUCIDE_CACHE)
+		if ok and exists then
+			local okRead, content = pcall(api.readfile, LUCIDE_CACHE)
+			if okRead and type(content) == "string" and #content > 10000 then
+				source = content
+			end
+		end
+	end
+	if not source then
+		local ok, body = pcall(function()
+			return game:HttpGet(LUCIDE_URL)
+		end)
+		if ok and type(body) == "string" and #body > 10000 then
+			source = body
+			if api.writefile then
+				ensureFolder("EasyLibrary/cache")
+				pcall(api.writefile, LUCIDE_CACHE, body)
+			end
+		end
+	end
+	if source and typeof(loadstring) == "function" then
+		local okCompile, chunk = pcall(loadstring, source)
+		if okCompile and type(chunk) == "function" then
+			local okRun, module = pcall(chunk)
+			if okRun and type(module) == "table" and type(module.GetAsset) == "function" then
+				S.lucide = module
+			end
+		end
+	end
+	return S.lucide
+end
+
+local function lucideAsset(name)
+	local lucide = S.lucide
+	if not lucide then
+		return nil
+	end
+	local key = LUCIDE_ALIAS[name] or name
+	local cached = S.iconCache[key]
+	if cached ~= nil then
+		return cached or nil
+	end
+	local ok, asset = pcall(lucide.GetAsset, key, 48)
+	if not ok or type(asset) ~= "table" then
+		ok, asset = pcall(lucide.GetAsset, key)
+	end
+	S.iconCache[key] = (ok and type(asset) == "table") and asset or false
+	return S.iconCache[key] or nil
+end
+
 local function isImage(name)
 	return type(name) == "string" and (string.find(name, "rbxasset", 1, true) ~= nil or string.find(name, "^%d+$") ~= nil)
 end
@@ -843,24 +975,40 @@ local function icon(name, parent, size, token)
 	size = size or 16
 	local holder = frame({ Size = UDim2.fromOffset(size, size) }, parent)
 	local parts = {}
-	if isImage(name) then
+	local asset = (not isImage(name)) and type(name) == "string" and lucideAsset(name) or nil
+	if asset then
 		local img = new("ImageLabel", {
 			BackgroundTransparency = 1,
 			Size = UDim2.fromScale(1, 1),
-			Image = string.find(name, "^%d+$") and ("rbxassetid://" .. name) or name,
+			Image = asset.Url,
+			ImageRectOffset = asset.ImageRectOffset,
+			ImageRectSize = asset.ImageRectSize,
 			ScaleType = Enum.ScaleType.Fit,
 		}, holder)
 		parts[1] = { img, "ImageColor3" }
-	elseif ICONS[name] then
-		local inner = frame({
-			AnchorPoint = Vector2.new(0.5, 0.5),
-			Position = UDim2.fromScale(0.5, 0.5),
-			Size = UDim2.fromOffset(16, 16),
-		}, holder)
-		if size ~= 16 then
-			new("UIScale", { Scale = size / 16 }, inner)
+	else
+		if type(name) == "string" and BUILTIN_ALIAS[name] then
+			name = BUILTIN_ALIAS[name]
 		end
-		ICONS[name](parts, inner)
+		if isImage(name) then
+			local img = new("ImageLabel", {
+				BackgroundTransparency = 1,
+				Size = UDim2.fromScale(1, 1),
+				Image = string.find(name, "^%d+$") and ("rbxassetid://" .. name) or name,
+				ScaleType = Enum.ScaleType.Fit,
+			}, holder)
+			parts[1] = { img, "ImageColor3" }
+		elseif ICONS[name] then
+			local inner = frame({
+				AnchorPoint = Vector2.new(0.5, 0.5),
+				Position = UDim2.fromScale(0.5, 0.5),
+				Size = UDim2.fromOffset(16, 16),
+			}, holder)
+			if size ~= 16 then
+				new("UIScale", { Scale = size / 16 }, inner)
+			end
+			ICONS[name](parts, inner)
+		end
 	end
 	local function set(t, animated)
 		for _, part in ipairs(parts) do
@@ -1018,6 +1166,7 @@ local WINDOW_DEFAULTS = {
 	KeybindList = false,
 	Animations = true,
 	AnimationSpeed = 1,
+	Icons = "Lucide",
 }
 
 local function sanitize(name)
@@ -1061,6 +1210,9 @@ function Library:CreateWindow(options)
 	Library:SetAccent(typeof(opts.Accent) == "Color3" and opts.Accent or SWATCHES[1])
 	Library:SetFont(opts.Font)
 	Library.ConfigFolder = opts.ConfigFolder or ("EasyLibrary/" .. (sanitize(opts.Title) ~= "" and sanitize(opts.Title) or "Default"))
+	if string.lower(tostring(opts.Icons)) ~= "builtin" then
+		loadLucide()
+	end
 
 	local win = setmetatable({
 		_opts = opts,
@@ -1081,7 +1233,7 @@ function Library:CreateWindow(options)
 		win:_buildSettings()
 	end
 	win:_relayout()
-	win:_open()
+	win:_transition(true)
 
 	if opts.Watermark then
 		Library:SetWatermarkVisible(true)
@@ -1157,7 +1309,6 @@ function Window:_build()
 	corner(main, 10)
 	stroke(main, "line2")
 	self._main = main
-	self._anim = new("UIScale", {}, main)
 
 	local header = frame({
 		Name = "Header",
@@ -1271,9 +1422,25 @@ function Window:_buildSearch(parent)
 	local ic = icon("search", box, 14, "tx3")
 	ic.AnchorPoint = Vector2.new(0, 0.5)
 	ic.Position = UDim2.new(0, 9, 0.5, 0)
+	local clear = button({
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -4, 0.5, 0),
+		Size = UDim2.fromOffset(20, 20),
+		BackgroundColor3 = tok.el2,
+		BackgroundTransparency = 1,
+		Visible = false,
+	}, box)
+	corner(clear, 5)
+	local clearIcon, setClear = icon("close", clear, 12, "tx3")
+	clearIcon.AnchorPoint = Vector2.new(0.5, 0.5)
+	clearIcon.Position = UDim2.fromScale(0.5, 0.5)
+	hover(clear, function(on)
+		tween(clear, quick(), { BackgroundTransparency = on and 0 or 1 })
+		setClear(on and "tx" or "tx3", true)
+	end)
 	local input = new("TextBox", {
 		Position = UDim2.fromOffset(30, 0),
-		Size = UDim2.new(1, -38, 1, 0),
+		Size = UDim2.new(1, -56, 1, 0),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Text = "",
@@ -1295,7 +1462,11 @@ function Window:_buildSearch(parent)
 		tween(st, quick(), { Transparency = 0 })
 	end)
 	connect(input:GetPropertyChangedSignal("Text"), function()
+		clear.Visible = input.Text ~= ""
 		self:_search(input.Text)
+	end)
+	connect(clear.Activated, function()
+		input.Text = ""
 	end)
 	self._searchBox = box
 	self._searchInput = input
@@ -1573,11 +1744,47 @@ function Window:_relayout()
 	self:_closePopup()
 end
 
-function Window:_open()
-	if S.animate then
-		self._anim.Scale = 0.95
+function Window:_transition(show)
+	self._transitionId = (self._transitionId or 0) + 1
+	local id = self._transitionId
+	local holder, main = self._holder, self._main
+	if not S.animate then
+		holder.Visible = show
+		return
 	end
-	tween(self._anim, info(0.32, Style.Back, Direction.Out), { Scale = 1 })
+	local fade = self._fade
+	if not fade then
+		fade = new("CanvasGroup", {
+			Name = "Fade",
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+		}, holder)
+		self._fade = fade
+	end
+	local size = self._size or self._opts.Size
+	fade.Size = UDim2.fromOffset(size.X + 4, size.Y + 4)
+	main.Position = UDim2.fromScale(0.5, 0.5)
+	main.Parent = fade
+	holder.Visible = true
+	local duration = show and 0.5 or 0.24
+	if show then
+		fade.Position = UDim2.fromOffset(0, 16)
+		fade.GroupTransparency = 1
+		tween(fade, info(duration, Style.Quint, Direction.Out), { Position = UDim2.fromOffset(0, 0), GroupTransparency = 0 })
+	else
+		tween(fade, info(duration, Style.Quad, Direction.In), { Position = UDim2.fromOffset(0, 12), GroupTransparency = 1 })
+	end
+	task.delay(duration / S.speed, function()
+		if id ~= self._transitionId or Library.Unloaded then
+			return
+		end
+		main.Parent = holder
+		main.Position = UDim2.fromOffset(0, 0)
+		if not show then
+			holder.Visible = false
+		end
+	end)
 end
 
 function Window:_showPill(on)
@@ -1607,19 +1814,8 @@ function Window:SetVisible(v)
 	end
 	self._visible = v
 	self:_closePopup()
-	if v then
-		self._holder.Visible = true
-		self:_open()
-		self:_showPill(false)
-	else
-		tween(self._anim, info(0.16, Style.Quad, Direction.In), { Scale = 0.95 })
-		task.delay(S.animate and 0.16 / S.speed or 0, function()
-			if not self._visible then
-				self._holder.Visible = false
-			end
-		end)
-		self:_showPill(true)
-	end
+	self:_transition(v)
+	self:_showPill(not v)
 	return self
 end
 
@@ -1708,8 +1904,21 @@ function Window:AddTab(options)
 		ScrollingDirection = Enum.ScrollingDirection.Y,
 		Visible = false,
 	}, self._content)
-	pad(page, 12, 12, 12, 12)
-	local cols = frame({ Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, page)
+	pad(page, 12, 0, 12, 0)
+	local cols = frame({
+		Position = UDim2.fromOffset(12, 0),
+		Size = UDim2.new(1, -24, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, page)
+	tab._empty = label({
+		Position = UDim2.fromOffset(12, 24),
+		Size = UDim2.new(1, -24, 0, 40),
+		Text = "",
+		TextSize = 12,
+		TextColor3 = tok.tx3,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		Visible = false,
+	}, page)
 	tab._columnsLayout = list(cols, true, 12)
 	tab._left = frame({ LayoutOrder = 1, Size = UDim2.new(0.5, -6, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, cols)
 	list(tab._left, false, 12)
@@ -1751,10 +1960,8 @@ function Window:SelectTab(tab)
 	end
 	tab:_setActive(true)
 	tab._page.Visible = true
-	self:_applySearch()
-	if S.animate then
-		tab._cols.Position = UDim2.fromOffset(0, 8)
-		tween(tab._cols, smooth(), { Position = UDim2.fromOffset(0, 0) })
+	if prev then
+		self:_animatePage(tab)
 	end
 	if tab._onSelect then
 		task.spawn(tab._onSelect)
@@ -1762,56 +1969,149 @@ function Window:SelectTab(tab)
 	return self
 end
 
-function Window:_search(text)
-	self._query = string.lower(trim(text))
-	self:_closePopup()
-	self:_applySearch()
-end
-
-function Window:_applySearch()
-	local tab = self._current
-	if not tab then
+function Window:_animatePage(tab)
+	if not S.animate then
 		return
 	end
-	local q = self._query
-	for _, g in ipairs(tab._groups) do
-		local groupHit = q ~= "" and string.find(string.lower(g.name or ""), q, 1, true) ~= nil
-		local any = false
-		for _, c in ipairs(g.containers) do
-			for _, el in ipairs(c._items) do
-				el._match = q == "" or groupHit or string.find(string.lower(el._search or ""), q, 1, true) ~= nil
-				el:_applyVisible()
-				if el._match and el._visible and not el._hiddenByDevice then
-					any = true
+	local cols = tab._cols
+	local fade = tab._fade
+	if not fade then
+		fade = new("CanvasGroup", {
+			Name = "Fade",
+			BackgroundTransparency = 1,
+			BorderSizePixel = 0,
+			Size = UDim2.new(1, -24, 0, 0),
+			AutomaticSize = Enum.AutomaticSize.Y,
+			Visible = false,
+		}, tab._page)
+		tab._fade = fade
+	end
+	tab._fadeId = (tab._fadeId or 0) + 1
+	local id = tab._fadeId
+	cols.Parent = fade
+	cols.Position = UDim2.fromOffset(0, 0)
+	cols.Size = UDim2.new(1, 0, 0, 0)
+	fade.Visible = true
+	fade.GroupTransparency = 1
+	fade.Position = UDim2.fromOffset(12, 10)
+	local duration = 0.35
+	tween(fade, info(duration, Style.Quint, Direction.Out), { GroupTransparency = 0, Position = UDim2.fromOffset(12, 0) })
+	task.delay(duration / S.speed, function()
+		if tab._fadeId ~= id or Library.Unloaded then
+			return
+		end
+		cols.Parent = tab._page
+		cols.Position = UDim2.fromOffset(12, 0)
+		cols.Size = UDim2.new(1, -24, 0, 0)
+		fade.Visible = false
+	end)
+end
+
+local function searchTokens(query)
+	local tokens = {}
+	for word in string.gmatch(string.lower(query), "%S+") do
+		tokens[#tokens + 1] = word
+	end
+	return tokens
+end
+
+local function matches(haystack, tokens)
+	for _, t in ipairs(tokens) do
+		if not string.find(haystack, t, 1, true) then
+			return false
+		end
+	end
+	return true
+end
+
+function Window:_search(text)
+	self._query = trim(text)
+	self:_closePopup()
+	self:_applySearch(true)
+end
+
+function Window:_applySearch(autoSwitch)
+	local tokens = searchTokens(self._query or "")
+	local active = #tokens > 0
+	local firstHit
+	for _, tab in ipairs(self._tabs) do
+		local hits = 0
+		for _, g in ipairs(tab._groups) do
+			local groupName = string.lower(g.name or "")
+			local any = false
+			local containerHits = {}
+			for ci, c in ipairs(g.containers) do
+				local count = 0
+				for _, el in ipairs(c._items) do
+					local match = (not active) or matches(groupName .. " " .. string.lower(el._search or ""), tokens)
+					el._match = match
+					el:_applyVisible()
+					if match and el._visible and not el._hiddenByDevice then
+						any = true
+						count = count + 1
+					end
+				end
+				containerHits[ci] = count
+				if active then
+					hits = hits + count
+				end
+			end
+			g.frame.Visible = (not active) or any
+			local tb = g.tabbox
+			if active and tb and tb._active then
+				local current = table.find(g.containers, tb._active.container)
+				if current and containerHits[current] == 0 then
+					for ci, count in ipairs(containerHits) do
+						if count > 0 then
+							tb:_select(tb._subs[ci])
+							break
+						end
+					end
 				end
 			end
 		end
-		g.frame.Visible = q == "" or any or groupHit
+		tab._hits = hits
+		tab:_setBadge(active and hits or nil)
+		tab._empty.Visible = active and hits == 0
+		tab._empty.Text = active and ("No elements match \"" .. self._query .. "\"") or ""
+		if active and hits > 0 and not firstHit then
+			firstHit = tab
+		end
+	end
+	local current = self._current
+	if autoSwitch and active and current and current._hits == 0 and firstHit then
+		self:SelectTab(firstHit)
 	end
 end
 
-function Window:_popup(anchor, width, height, build, onClose)
+function Window:_popup(anchor, width, height, build, onClose, ignore)
 	self:_closePopup()
-	local overlay = self._overlay
-	local catcher = button({
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(0.5, 0.5),
-		Size = UDim2.fromOffset(8000, 8000),
-		ZIndex = 1,
-	}, overlay)
-	local panel = frame({
+	local group = new("CanvasGroup", {
 		ZIndex = 2,
+		BackgroundColor3 = tok.line2,
+		BorderSizePixel = 0,
+		Size = UDim2.fromOffset(width, height + 2),
+		GroupTransparency = S.animate and 1 or 0,
+	}, self._overlay)
+	corner(group, 6)
+	local panel = frame({
+		Position = UDim2.fromOffset(1, 1),
+		Size = UDim2.new(1, -2, 1, -2),
 		BackgroundColor3 = tok.box,
-		Size = UDim2.fromOffset(width, height),
 		Active = true,
-	}, overlay)
-	corner(panel, 6)
-	stroke(panel, "line2")
-	local p = { panel = panel, catcher = catcher, conns = {}, onClose = onClose, anchor = anchor }
+	}, group)
+	corner(panel, 5)
+	local p = {
+		group = group,
+		panel = panel,
+		conns = {},
+		onClose = onClose,
+		anchor = anchor,
+		ignore = ignore or { anchor },
+		height = height + 2,
+		width = width,
+	}
 	self._pop = p
-	p.conns[#p.conns + 1] = catcher.Activated:Connect(function()
-		self:_closePopup()
-	end)
 	local previous = S.collect
 	S.collect = p.conns
 	local ok, err = pcall(build, panel, p)
@@ -1820,7 +2120,23 @@ function Window:_popup(anchor, width, height, build, onClose)
 		self:_closePopup()
 		error(err, 0)
 	end
-	self:_placePopup(p, width, height)
+	local below = self:_placePopup(p)
+	p.conns[#p.conns + 1] = UserInputService.InputBegan:Connect(function(input)
+		local t = input.UserInputType
+		if t ~= MB1 and t ~= TOUCH and t ~= Enum.UserInputType.MouseButton2 then
+			return
+		end
+		local pos = pointer(input)
+		if over(group, pos) then
+			return
+		end
+		for _, g in ipairs(p.ignore) do
+			if over(g, pos) then
+				return
+			end
+		end
+		self:_closePopup()
+	end)
 	local tab = self._current
 	if tab then
 		p.conns[#p.conns + 1] = tab._page:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
@@ -1828,13 +2144,15 @@ function Window:_popup(anchor, width, height, build, onClose)
 		end)
 	end
 	if S.animate then
-		local s = new("UIScale", { Scale = 0.96 }, panel)
-		tween(s, info(0.18, Style.Quint, Direction.Out), { Scale = 1 })
+		local final = group.Position
+		group.Position = UDim2.fromOffset(final.X.Offset, final.Y.Offset + (below and -6 or 6))
+		tween(group, info(0.22, Style.Quint, Direction.Out), { Position = final, GroupTransparency = 0 })
 	end
 	return p
 end
 
-function Window:_placePopup(p, width, height)
+function Window:_placePopup(p)
+	local width, height = p.width, p.height
 	local scale = self._fit.Scale
 	local o = self._overlay.AbsolutePosition
 	local a, s = p.anchor.AbsolutePosition, p.anchor.AbsoluteSize
@@ -1842,8 +2160,9 @@ function Window:_placePopup(p, width, height)
 	local top = GuiService:GetGuiInset().Y
 	local fitsBelow = a.Y + s.Y + (height + 4) * scale <= vp.Y - 8
 	local fitsAbove = a.Y - (height + 4) * scale >= top + 8
+	local below = fitsBelow or not fitsAbove
 	local y
-	if fitsBelow or not fitsAbove then
+	if below then
 		y = (a.Y + s.Y - o.Y) / scale + 4
 	else
 		y = (a.Y - o.Y) / scale - 4 - height
@@ -1852,8 +2171,9 @@ function Window:_placePopup(p, width, height)
 	local minX = (8 - o.X) / scale
 	local maxX = (vp.X - 8 - o.X) / scale - width
 	x = math.clamp(x, minX, math.max(minX, maxX))
-	p.panel.Position = UDim2.fromOffset(x, y)
-	p.panel.Size = UDim2.fromOffset(width, height)
+	p.group.Position = UDim2.fromOffset(x, y)
+	p.group.Size = UDim2.fromOffset(width, height)
+	return below
 end
 
 function Window:_closePopup()
@@ -1865,8 +2185,16 @@ function Window:_closePopup()
 	for _, c in ipairs(p.conns) do
 		c:Disconnect()
 	end
-	p.catcher:Destroy()
-	p.panel:Destroy()
+	local group = p.group
+	if S.animate and not Library.Unloaded then
+		p.panel.Active = false
+		tween(group, info(0.12, Style.Quad, Direction.In), { GroupTransparency = 1 })
+		task.delay(0.12 / S.speed, function()
+			group:Destroy()
+		end)
+	else
+		group:Destroy()
+	end
 	if p.onClose then
 		p.onClose()
 	end
@@ -1908,9 +2236,15 @@ function Window:_tooltip(target, text)
 				TextTruncate = Enum.TextTruncate.None,
 				ZIndex = 40,
 			}, self._overlay)
-			tip.BackgroundTransparency = 0
 			corner(tip, 5)
 			pad(tip, 6, 9, 6, 9)
+			if S.animate then
+				tip.BackgroundTransparency = 1
+				tip.TextTransparency = 1
+				tween(tip, info(0.18, Style.Quad, Direction.Out), { BackgroundTransparency = 0, TextTransparency = 0 })
+			else
+				tip.BackgroundTransparency = 0
+			end
 		end)
 	end)
 	connect(target.MouseLeave, hide)
@@ -1946,6 +2280,23 @@ function Tab:_buildSideButton()
 		TextColor3 = tok.tx2,
 		Visible = false,
 	}, b)
+	local badge = label({
+		AnchorPoint = Vector2.new(1, 0.5),
+		Position = UDim2.new(1, -8, 0.5, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 18),
+		BackgroundColor3 = tok.accent,
+		Text = "",
+		TextSize = 11,
+		FontFace = F_MONO,
+		TextColor3 = tok.tx,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextTruncate = Enum.TextTruncate.None,
+		Visible = false,
+	}, b)
+	badge.BackgroundTransparency = 0.84
+	corner(badge, 9)
+	pad(badge, 0, 6, 0, 6)
 	hover(b, function(on)
 		if win._current ~= self then
 			tween(b, quick(), { BackgroundTransparency = on and 0.5 or 1 })
@@ -1954,7 +2305,21 @@ function Tab:_buildSideButton()
 	connect(b.Activated, function()
 		win:SelectTab(self)
 	end)
-	self._sideUI = { button = b, icon = ic, setIcon = setIcon, text = text, letter = letter }
+	self._sideUI = { button = b, icon = ic, setIcon = setIcon, text = text, letter = letter, badge = badge }
+end
+
+function Tab:_setBadge(count)
+	self._badgeCount = count
+	local s, t = self._sideUI, self._topUI
+	local show = count ~= nil and count > 0
+	local text = show and tostring(count) or ""
+	s.badge.Text = text
+	s.badge.Visible = show and not self._win._compact
+	t.badge.Text = text
+	t.badge.Visible = show
+	local dim = count == 0 and 0.55 or 0
+	tween(s.text, quick(), { TextTransparency = dim })
+	tween(t.text, quick(), { TextTransparency = dim })
 end
 
 function Tab:_buildTopButton()
@@ -1982,6 +2347,22 @@ function Tab:_buildTopButton()
 		TextColor3 = tok.tx2,
 		TextTruncate = Enum.TextTruncate.None,
 	}, inner)
+	local badge = label({
+		LayoutOrder = 3,
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, 18),
+		BackgroundColor3 = tok.accent,
+		Text = "",
+		TextSize = 11,
+		FontFace = F_MONO,
+		TextColor3 = tok.tx,
+		TextXAlignment = Enum.TextXAlignment.Center,
+		TextTruncate = Enum.TextTruncate.None,
+		Visible = false,
+	}, inner)
+	badge.BackgroundTransparency = 0.84
+	corner(badge, 9)
+	pad(badge, 0, 6, 0, 6)
 	local underline = frame({
 		AnchorPoint = Vector2.new(0, 1),
 		Position = UDim2.fromScale(0, 1),
@@ -1998,7 +2379,7 @@ function Tab:_buildTopButton()
 	connect(b.Activated, function()
 		win:SelectTab(self)
 	end)
-	self._topUI = { button = b, setIcon = setIcon, text = text, underline = underline }
+	self._topUI = { button = b, setIcon = setIcon, text = text, underline = underline, badge = badge }
 end
 
 function Tab:_setActive(on)
@@ -2028,6 +2409,7 @@ function Tab:_setCompact(compact)
 	local s = self._sideUI
 	s.text.Visible = not compact
 	s.letter.Visible = compact and s.icon == nil
+	s.badge.Visible = not compact and self._badgeCount ~= nil and self._badgeCount > 0
 	if s.icon then
 		s.icon.AnchorPoint = compact and Vector2.new(0.5, 0.5) or Vector2.new(0, 0.5)
 		s.icon.Position = compact and UDim2.fromScale(0.5, 0.5) or UDim2.new(0, 10, 0.5, 0)
@@ -2175,7 +2557,7 @@ function Container:_add(cls, kind, flag, options, root)
 		_visible = options.Visible ~= false,
 		_match = true,
 		_noSave = options.NoSave == true,
-		_search = tostring(text),
+		_search = tostring(text) .. " " .. tostring(options.Tooltip or ""),
 	}, cls)
 	root.LayoutOrder = self:_next()
 	self._items[#self._items + 1] = el
@@ -2272,7 +2654,9 @@ function Tab:AddTabbox(options)
 	list(buttons, true, 2, nil, Enum.VerticalAlignment.Center)
 	local entry = { frame = box, name = name, containers = {} }
 	self._groups[#self._groups + 1] = entry
-	return setmetatable({ _tab = self, _box = box, _buttons = buttons, _subs = {}, _entry = entry }, Tabbox)
+	local tb = setmetatable({ _tab = self, _box = box, _buttons = buttons, _subs = {}, _entry = entry }, Tabbox)
+	entry.tabbox = tb
+	return tb
 end
 
 function Tab:AddLeftTabbox(name)
@@ -2314,6 +2698,7 @@ function Tabbox:AddTab(name)
 end
 
 function Tabbox:_select(sub)
+	self._active = sub
 	for _, s in ipairs(self._subs) do
 		local on = s == sub
 		s.body.Visible = on
@@ -3195,6 +3580,8 @@ function Container:AddDropdown(flag, options)
 	end
 	el._allowNull = options.AllowNull == true
 	el._fontPreview = options.FontPreview == true
+	el._baseSearch = el._search
+	el._search = el._baseSearch .. " " .. table.concat(el.Values, " ")
 	el._placeholder = tostring(options.Placeholder or (el.Multi and "None" or "Select..."))
 	if hasText then
 		el._label = label({ Size = UDim2.new(1, 0, 0, 16), Text = el.Text, TextSize = 12, TextColor3 = tok.tx2 }, root)
@@ -3510,6 +3897,7 @@ function Dropdown:SetValues(values)
 	for _, v in ipairs(values or {}) do
 		self.Values[#self.Values + 1] = tostring(v)
 	end
+	self._search = (self._baseSearch or self.Text) .. " " .. table.concat(self.Values, " ")
 	if self._open then
 		self._win:_closePopup()
 	end
@@ -3846,7 +4234,7 @@ local function hueSequence()
 	return ColorSequence.new(points)
 end
 
-local function openPicker(win, anchor, state, onChange, onClose)
+local function openPicker(win, anchor, state, onChange, onClose, ignore)
 	local W = 232
 	local svH = 130
 	local inputH = rowHeight(28, 32)
@@ -4028,7 +4416,7 @@ local function openPicker(win, anchor, state, onChange, onClose)
 		if onClose then
 			onClose()
 		end
-	end)
+	end, ignore)
 end
 
 local ColorPicker = class()
@@ -4095,7 +4483,7 @@ function ColorPicker:_toggle()
 		self:_commit()
 	end, function()
 		self._open = false
-	end)
+	end, { self._swatch, self._root or self._swatch })
 end
 
 function ColorPicker:_commit()
@@ -4279,15 +4667,38 @@ end
 
 function Library:_placeOverlays()
 	local y = overlayTop()
-	if S.wm then
+	if S.wm and not S.wmMoved then
 		S.wm.Position = UDim2.fromOffset(16, y)
 		if S.wm.Visible then
 			y = y + 38
 		end
 	end
-	if S.kbl then
+	if S.kbl and not S.kblMoved then
 		S.kbl.Position = UDim2.fromOffset(16, y)
 	end
+end
+
+local function draggable(target, movedKey)
+	local start, origin
+	track(target, {
+		start = function(pos)
+			start = pos
+			origin = target.Position
+		end,
+		move = function(pos)
+			local d = pos - start
+			if not S[movedKey] and d.Magnitude < 3 then
+				return
+			end
+			S[movedKey] = true
+			local vp = viewport()
+			local size = target.AbsoluteSize
+			target.Position = UDim2.fromOffset(
+				math.clamp(origin.X.Offset + d.X, 0, math.max(vp.X - size.X, 0)),
+				math.clamp(origin.Y.Offset + d.Y, 0, math.max(vp.Y - size.Y, 0))
+			)
+		end,
+	})
 end
 
 function Library:SetWatermarkVisible(on)
@@ -4306,8 +4717,10 @@ function Library:SetWatermarkVisible(on)
 			Size = UDim2.fromOffset(0, 30),
 			BackgroundColor3 = tok.bg,
 			ZIndex = 40,
+			Active = true,
 		}, gui)
 		corner(wm, 6)
+		draggable(wm, "wmMoved")
 		stroke(wm, "line2")
 		pad(wm, 0, 12, 0, 8)
 		list(wm, true, 10, nil, Enum.VerticalAlignment.Center)
@@ -4417,8 +4830,10 @@ function Library:_renderKeybinds()
 			AutomaticSize = Enum.AutomaticSize.Y,
 			BackgroundColor3 = tok.bg,
 			ZIndex = 40,
+			Active = true,
 		}, gui)
 		corner(panel, 8)
+		draggable(panel, "kblMoved")
 		stroke(panel, "line2")
 		list(panel, false, 0)
 		local header = frame({ LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 32) }, panel)
@@ -4643,29 +5058,37 @@ function Library:Dialog(options)
 		ZIndex = 60,
 	}, gui)
 	local top = GuiService:GetGuiInset().Y
-	local card = frame({
+	local center = UDim2.new(0.5, 0, 0.5, math.floor(top / 2))
+	local card = new("CanvasGroup", {
 		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.new(0.5, 0, 0.5, math.floor(top / 2)),
+		Position = S.animate and (center + UDim2.fromOffset(0, 16)) or center,
 		Size = UDim2.fromOffset(math.min(340, viewport().X - 24), 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
-		BackgroundColor3 = tok.box,
+		BackgroundColor3 = tok.line2,
+		BorderSizePixel = 0,
+		GroupTransparency = S.animate and 1 or 0,
 		ZIndex = 61,
-		Active = true,
 	}, gui)
 	corner(card, 10)
-	stroke(card, "line2")
-	pad(card, 18, 18, 18, 18)
-	list(card, false, 12)
-	local scale = new("UIScale", { Scale = S.animate and 0.95 or 1 }, card)
+	pad(card, 1, 1, 1, 1)
+	local body = frame({
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = tok.box,
+		Active = true,
+	}, card)
+	corner(body, 9)
+	pad(body, 18, 18, 18, 18)
+	list(body, false, 12)
 
-	local badge = frame({ LayoutOrder = 1, Size = UDim2.fromOffset(34, 34), BackgroundColor3 = tok[colorToken] }, card)
+	local badge = frame({ LayoutOrder = 1, Size = UDim2.fromOffset(34, 34), BackgroundColor3 = tok[colorToken] }, body)
 	badge.BackgroundTransparency = 0.84
 	corner(badge, 8)
 	local ic = icon(iconName, badge, 17, colorToken)
 	ic.AnchorPoint = Vector2.new(0.5, 0.5)
 	ic.Position = UDim2.fromScale(0.5, 0.5)
 
-	local texts = frame({ LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, card)
+	local texts = frame({ LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 0), AutomaticSize = Enum.AutomaticSize.Y }, body)
 	list(texts, false, 6)
 	label({
 		LayoutOrder = 1,
@@ -4689,7 +5112,7 @@ function Library:Dialog(options)
 		}, texts)
 	end
 
-	local row = frame({ LayoutOrder = 3, Size = UDim2.new(1, 0, 0, rowHeight(30, 34)) }, card)
+	local row = frame({ LayoutOrder = 3, Size = UDim2.new(1, 0, 0, rowHeight(30, 34)) }, body)
 	list(row, true, 8, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center)
 
 	local d = { closed = false }
@@ -4702,11 +5125,11 @@ function Library:Dialog(options)
 			S.dialog = nil
 		end
 		if S.animate then
-			local out = info(0.16, Style.Quad, Direction.In)
+			local out = info(0.2, Style.Quad, Direction.In)
+			body.Active = false
 			TweenService:Create(dim, out, { BackgroundTransparency = 1 }):Play()
-			TweenService:Create(scale, out, { Scale = 0.95 }):Play()
-			card.Visible = false
-			task.delay(0.16 / S.speed, function()
+			TweenService:Create(card, out, { GroupTransparency = 1, Position = center + UDim2.fromOffset(0, 12) }):Play()
+			task.delay(0.2 / S.speed, function()
 				dim:Destroy()
 				card:Destroy()
 			end)
@@ -4761,8 +5184,8 @@ function Library:Dialog(options)
 	end
 
 	if S.animate then
-		tween(dim, info(0.2, Style.Quad, Direction.Out), { BackgroundTransparency = 0.45 })
-		tween(scale, pop(), { Scale = 1 })
+		tween(dim, info(0.3, Style.Quad, Direction.Out), { BackgroundTransparency = 0.45 })
+		tween(card, info(0.45, Style.Quint, Direction.Out), { GroupTransparency = 0, Position = center })
 	else
 		dim.BackgroundTransparency = 0.45
 	end
@@ -4771,20 +5194,6 @@ end
 
 local function canSave()
 	return api.writefile ~= nil and api.readfile ~= nil and api.isfile ~= nil
-end
-
-local function ensureFolder(path)
-	if not api.isfolder or not api.makefolder then
-		return
-	end
-	local current = ""
-	for part in string.gmatch(path, "[^/]+") do
-		current = current == "" and part or (current .. "/" .. part)
-		local ok, exists = pcall(api.isfolder, current)
-		if ok and not exists then
-			pcall(api.makefolder, current)
-		end
-	end
 end
 
 local function configDir()
@@ -4934,7 +5343,7 @@ end
 
 function Window:_buildSettings()
 	local opts = self._opts
-	local tab = self:AddTab({ Name = opts.SettingsName or "Settings", Icon = "settings", Bottom = true })
+	local tab = self:AddTab({ Name = opts.SettingsName or "Settings", Icon = "sliders-horizontal", Bottom = true })
 	self._settingsTab = tab
 
 	local ui = tab:AddLeftGroupbox("Interface")
