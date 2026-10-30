@@ -59,7 +59,6 @@ local FONTS = {
 }
 
 local TEXTS = {
-	GuideTitle = "How to get a key",
 	Note = "Keys last 24 hours",
 	Heading = "Enter your key",
 	Description = "A valid key unlocks {title} on this device.",
@@ -77,7 +76,6 @@ local TEXTS = {
 	SavedInvalid = "Your saved key has expired. Get a new one.",
 	Locked = "Too many attempts. Try again in {time}s.",
 	Attempts = "{n} tries left",
-	Remember = "Remember this key",
 	Verify = "Verify Key",
 	Verifying = "Checking",
 	Divider = "no key yet?",
@@ -86,12 +84,6 @@ local TEXTS = {
 	Discord = "Join Discord",
 	DiscordCopied = "Invite copied",
 	CopyFallback = "Copy this link: {link}",
-}
-
-local GUIDE = {
-	{ "Copy the key link", "Open it in your browser." },
-	{ "Complete the checkpoints", "Your key appears at the end." },
-	{ "Paste it here", "Then press Verify Key." },
 }
 
 local DEFAULTS = {
@@ -112,12 +104,10 @@ local DEFAULTS = {
 	SaveKey = true,
 	FileName = "EasyLibrary/key.txt",
 	AutoLoadSaved = true,
-	RememberDefault = true,
-	ShowGuide = true,
+	ShowSidebar = true,
 	ShowCloseButton = true,
 	Draggable = true,
 	AutoFocus = false,
-	Guide = GUIDE,
 	Texts = nil,
 	Dim = true,
 	DimTransparency = 0.45,
@@ -137,9 +127,7 @@ local DEFAULTS = {
 	OnClose = nil,
 }
 
-local ASIDE_W, WIDE_W, COMPACT_W = 236, 660, 424
-local ASIDE_MIN_H = 296
-local VERIFY_W = 150
+local ASIDE_W, FORM_W = 200, 378
 local DARK_TEXT = Color3.fromHex("111113")
 local WHITE = Color3.new(1, 1, 1)
 
@@ -159,11 +147,9 @@ local function fontSpec(weight, mono)
 end
 
 local F_REG = fontSpec("Regular")
-local F_MED = fontSpec("Medium")
 local F_SEMI = fontSpec("SemiBold")
 local F_BOLD = fontSpec("Bold")
 local F_MONO = fontSpec("Regular", true)
-local F_MONO_MED = fontSpec("Medium", true)
 
 local api = {
 	isfile = typeof(isfile) == "function" and isfile or nil,
@@ -302,14 +288,13 @@ function KeyUI.new(options)
 	self._animate = opts.Animations ~= false
 	self._speed = math.max(tonumber(opts.AnimationSpeed) or 1, 0.05)
 	self._canSave = opts.SaveKey ~= false and api.writefile ~= nil and api.readfile ~= nil and api.isfile ~= nil
-	self._remember = self._canSave and opts.RememberDefault ~= false
 
 	self._themed = {}
 	self._fonted = {}
 	self._conns = {}
 	self._loops = {}
 	self._shadows = {}
-	self._guideRows = {}
+	self._brandLabels = {}
 	self._state = "idle"
 	self._attempts = 0
 	self._destroyed = false
@@ -529,9 +514,29 @@ function KeyUI:_iconLink(parent, color)
 	self:_ring(parent, 10, 7, 8, 5, 1.5, color)
 end
 
-function KeyUI:_iconChat(parent, color)
-	self:_ring(parent, 7, 6, 12, 9, 1.5, color, UDim.new(0, 3))
-	self:_bar(parent, 4, 11, 4, 2, 50, color)
+function KeyUI:_iconDiscord(parent, color, hole)
+	local body = self:_frame({
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.fromOffset(7, 7),
+		Size = UDim2.fromOffset(15, 10),
+		BackgroundColor3 = tok[color],
+	}, parent)
+	self:_corner(body, UDim.new(0, 4))
+	self:_bar(parent, 2.5, 11, 4, 4, 0, color)
+	self:_bar(parent, 11.5, 11, 4, 4, 0, color)
+	local eyes = {}
+	for i, x in ipairs({ 4.6, 9.4 }) do
+		local eye = self:_frame({
+			AnchorPoint = Vector2.new(0.5, 0.5),
+			Position = UDim2.fromOffset(x, 7.4),
+			Size = UDim2.fromOffset(3, 3.4),
+			BackgroundColor3 = tok[hole],
+			ZIndex = 2,
+		}, parent)
+		self:_corner(eye)
+		eyes[i] = eye
+	end
+	return eyes
 end
 
 function KeyUI:_iconPaste(parent, color)
@@ -593,17 +598,15 @@ end
 function KeyUI:_build()
 	local opts = self._opts
 	local texts = self._texts
-	local showGuide = opts.ShowGuide ~= false
+	local showSidebar = opts.ShowSidebar ~= false
 	local hasLink = opts.KeyLink ~= nil and opts.KeyLink ~= ""
 	local hasDiscord = opts.Discord ~= nil and opts.Discord ~= ""
 	local hasButtons = hasLink or hasDiscord
 
-	local width = showGuide and WIDE_W or COMPACT_W
-	local innerW = width - 2
-	local x0 = (showGuide and ASIDE_W or 0) + 22
-	local rw = innerW - x0 - 22
-	local bottom = hasButtons and 312 or 236
-	local innerH = math.max(bottom, showGuide and ASIDE_MIN_H or 0)
+	local x0 = (showSidebar and ASIDE_W or 0) + 22
+	local rw = FORM_W
+	local width = x0 + rw + 24
+	local innerH = hasButtons and 312 or 236
 	local height = innerH + 2
 	self._width, self._height = width, height
 
@@ -681,10 +684,10 @@ function KeyUI:_build()
 	self:_corner(surface, UDim.new(0, 11))
 	self._surface = surface
 
-	if showGuide then
-		self:_buildAside(surface, innerH)
+	if showSidebar then
+		self:_buildAside(surface)
 	end
-	self:_buildForm(surface, x0, rw, showGuide, hasLink, hasDiscord)
+	self:_buildForm(surface, x0, rw, showSidebar, hasLink, hasDiscord)
 
 	local strip = self:_frame({
 		Name = "Strip",
@@ -708,7 +711,7 @@ function KeyUI:_build()
 	end
 end
 
-function KeyUI:_buildAside(surface, innerH)
+function KeyUI:_buildAside(surface)
 	local opts = self._opts
 	local texts = self._texts
 
@@ -733,93 +736,58 @@ function KeyUI:_buildAside(surface, innerH)
 		BackgroundColor3 = tok.line,
 	}, aside)
 
-	self:_buildLogo(aside, UDim2.fromOffset(20, 22), 38, 10, 20)
+	local hasNote = texts.Note ~= nil and texts.Note ~= ""
+	local hasSubtitle = opts.Subtitle ~= nil and opts.Subtitle ~= ""
+	local hidden = self._animate and 1 or 0
 
-	self._asideTitle = self:_label({
-		Position = UDim2.fromOffset(70, 22),
-		Size = UDim2.new(1, -90, 0, 20),
+	local brand = self:_frame({
+		Name = "Brand",
+		AnchorPoint = Vector2.new(0.5, 0.5),
+		Position = UDim2.new(0.5, 0, 0.5, hasNote and -23 or 0),
+		Size = UDim2.new(1, -32, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundTransparency = 1,
+	}, aside)
+	self:_new("UIListLayout", {
+		FillDirection = Enum.FillDirection.Vertical,
+		HorizontalAlignment = Enum.HorizontalAlignment.Center,
+		SortOrder = Enum.SortOrder.LayoutOrder,
+		Padding = UDim.new(0, 4),
+	}, brand)
+
+	local logo = self:_buildLogo(brand, UDim2.new(), 56, 14, 28)
+	logo.LayoutOrder = 1
+	self:_frame({ LayoutOrder = 2, Size = UDim2.fromOffset(1, 10), BackgroundTransparency = 1 }, brand)
+
+	self._brandLabels[#self._brandLabels + 1] = self:_label({
+		Name = "Title",
+		LayoutOrder = 3,
+		Size = UDim2.new(1, 0, 0, 20),
 		Text = tostring(opts.Title or ""),
-		TextSize = 15,
+		TextSize = 16,
 		FontFace = F_SEMI,
 		TextColor3 = tok.tx,
+		TextXAlignment = Enum.TextXAlignment.Center,
 		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, aside)
-	self._asideSubtitle = self:_label({
-		Position = UDim2.fromOffset(70, 43),
-		Size = UDim2.new(1, -90, 0, 14),
-		Text = tostring(opts.Subtitle or ""),
-		TextSize = 11,
-		FontFace = F_REG,
-		TextColor3 = tok.tx3,
-		TextTruncate = Enum.TextTruncate.AtEnd,
-	}, aside)
-	if opts.Subtitle == nil or opts.Subtitle == "" then
-		self._asideSubtitle.Visible = false
-		self._asideTitle.Position = UDim2.fromOffset(70, 31)
-	end
+		TextTransparency = hidden,
+	}, brand)
 
-	self:_label({
-		Position = UDim2.fromOffset(20, 82),
-		Size = UDim2.new(1, -40, 0, 14),
-		Text = string.upper(tostring(texts.GuideTitle or "")),
-		TextSize = 10,
-		FontFace = F_MED,
-		TextColor3 = tok.tx3,
-	}, aside)
-
-	local guide = type(opts.Guide) == "table" and opts.Guide or GUIDE
-	local animate = self._animate
-	for i, item in ipairs(guide) do
-		if i > 4 then
-			break
-		end
-		local title = type(item) == "table" and (item.Title or item[1]) or item
-		local body = type(item) == "table" and (item.Text or item[2]) or nil
-		local row = self:_frame({
-			Name = "Guide" .. i,
-			Position = UDim2.fromOffset(animate and 10 or 20, 104 + (i - 1) * 46),
-			Size = UDim2.new(1, -40, 0, 36),
-			BackgroundTransparency = 1,
-		}, aside)
-		local num = self:_frame({
-			Size = UDim2.fromOffset(20, 20),
-			BackgroundColor3 = tok.accent,
-			BackgroundTransparency = 0.84,
-		}, row)
-		self:_corner(num)
-		local numLabel = self:_label({
-			Size = UDim2.fromScale(1, 1),
-			Text = tostring(i),
-			TextSize = 10,
-			FontFace = F_MONO_MED,
-			TextColor3 = tok.tx,
-			TextXAlignment = Enum.TextXAlignment.Center,
-			TextTransparency = animate and 1 or 0,
-		}, num)
-		local titleLabel = self:_label({
-			Position = UDim2.fromOffset(30, 1),
-			Size = UDim2.new(1, -30, 0, 16),
-			Text = tostring(title or ""),
+	if hasSubtitle then
+		self._brandLabels[#self._brandLabels + 1] = self:_label({
+			Name = "Subtitle",
+			LayoutOrder = 4,
+			Size = UDim2.new(1, 0, 0, 15),
+			Text = tostring(opts.Subtitle),
 			TextSize = 12,
-			FontFace = F_MED,
-			TextColor3 = tok.tx,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-			TextTransparency = animate and 1 or 0,
-		}, row)
-		local bodyLabel = self:_label({
-			Position = UDim2.fromOffset(30, 18),
-			Size = UDim2.new(1, -30, 0, 15),
-			Text = tostring(body or ""),
-			TextSize = 11,
 			FontFace = F_REG,
 			TextColor3 = tok.tx3,
+			TextXAlignment = Enum.TextXAlignment.Center,
 			TextTruncate = Enum.TextTruncate.AtEnd,
-			TextTransparency = animate and 1 or 0,
-		}, row)
-		self._guideRows[i] = { row = row, labels = { numLabel, titleLabel, bodyLabel } }
+			TextTransparency = hidden,
+		}, brand)
 	end
 
-	if texts.Note and texts.Note ~= "" then
+	if hasNote then
 		self:_frame({
 			Position = UDim2.new(0, 20, 1, -46),
 			Size = UDim2.new(1, -40, 0, 1),
@@ -875,13 +843,13 @@ function KeyUI:_buildLogo(parent, position, size, radius, letterSize)
 	return logo
 end
 
-function KeyUI:_buildForm(surface, x0, rw, showGuide, hasLink, hasDiscord)
+function KeyUI:_buildForm(surface, x0, rw, showSidebar, hasLink, hasDiscord)
 	local opts = self._opts
 	local texts = self._texts
 	local vars = { title = tostring(opts.Title or "") }
 
 	local headX = x0
-	if not showGuide then
+	if not showSidebar then
 		self:_buildLogo(surface, UDim2.fromOffset(x0, 20), 32, 9, 16)
 		headX = x0 + 44
 	end
@@ -1178,58 +1146,10 @@ end
 function KeyUI:_buildActions(surface, x0, rw)
 	local texts = self._texts
 
-	if self._canSave then
-		local remember = self:_button({
-			Name = "Remember",
-			Position = UDim2.fromOffset(x0, 176),
-			Size = UDim2.fromOffset(rw - VERIFY_W - 12, 38),
-			BackgroundTransparency = 1,
-		}, surface)
-		local check = self:_frame({
-			AnchorPoint = Vector2.new(0, 0.5),
-			Position = UDim2.fromScale(0, 0.5),
-			Size = UDim2.fromOffset(16, 16),
-			BackgroundColor3 = tok.el,
-		}, remember)
-		self:_corner(check, UDim.new(0, 4))
-		local checkStroke = self:_stroke(check, "line2", 1)
-		local mark = self:_iconBox(14, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5), check)
-		mark.Position = UDim2.new(0.5, 1, 0.5, 0)
-		self:_iconCheck(mark, "onAccent")
-		local markScale = self:_new("UIScale", {}, mark)
-		self:_label({
-			Position = UDim2.fromOffset(28, 0),
-			Size = UDim2.new(1, -28, 1, 0),
-			Text = tostring(texts.Remember or ""),
-			TextSize = 13,
-			FontFace = F_REG,
-			TextColor3 = tok.tx,
-			TextTruncate = Enum.TextTruncate.AtEnd,
-		}, remember)
-
-		local function render(animated)
-			local on = self._remember
-			mark.Visible = on
-			self:_bindTween(check, "BackgroundColor3", on and "accent" or "el")
-			self:_record(checkStroke, "Color", on and "accent" or "line2")
-			self:_tween(checkStroke, self._quick, { Color = self:_color(on and "accent" or "line2") })
-			if on and animated and self._animate then
-				markScale.Scale = 0.4
-				self:_tween(markScale, self._pop, { Scale = 1 })
-			end
-		end
-		render(false)
-		self:_connect(remember.Activated, function()
-			self._remember = not self._remember
-			render(true)
-		end)
-	end
-
 	local verify = self:_button({
 		Name = "Verify",
-		AnchorPoint = Vector2.new(1, 0),
-		Position = UDim2.fromOffset(x0 + rw, 176),
-		Size = UDim2.fromOffset(VERIFY_W, 38),
+		Position = UDim2.fromOffset(x0, 176),
+		Size = UDim2.fromOffset(rw, 38),
 		BackgroundColor3 = tok.accent,
 	}, surface)
 	self:_corner(verify, UDim.new(0, 7))
@@ -1301,10 +1221,11 @@ function KeyUI:_secondary(surface, position, width, iconName, text, onClick)
 	local iconHolder = self:_iconBox(14, UDim2.new(), Vector2.new(0, 0), inner)
 	iconHolder.LayoutOrder = 1
 	local normal = self:_iconBox(14, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5), iconHolder)
+	local holes = nil
 	if iconName == "link" then
 		self:_iconLink(normal, "tx3")
 	else
-		self:_iconChat(normal, "tx3")
+		holes = self:_iconDiscord(normal, "tx3", "el")
 	end
 	local done = self:_iconBox(14, UDim2.fromScale(0.5, 0.5), Vector2.new(0.5, 0.5), iconHolder)
 	done.Visible = false
@@ -1322,7 +1243,13 @@ function KeyUI:_secondary(surface, position, width, iconName, text, onClick)
 	}, inner)
 
 	self:_hover(button, function(on)
-		self:_bindTween(button, "BackgroundColor3", on and "el2" or "el")
+		local token = on and "el2" or "el"
+		self:_bindTween(button, "BackgroundColor3", token)
+		if holes then
+			for _, h in ipairs(holes) do
+				self:_bindTween(h, "BackgroundColor3", token)
+			end
+		end
 	end)
 	self:_press(button)
 	self:_connect(button.Activated, onClick)
@@ -1412,15 +1339,8 @@ function KeyUI:_open()
 	for _, s in ipairs(self._logoScales or {}) do
 		self:_tween(s, self:_info(0.55, Style.Back, Direction.Out, 0, false, 0.06), { Scale = 1 })
 	end
-	for i, g in ipairs(self._guideRows) do
-		local delay = 0.16 + (i - 1) * 0.06
-		local pos = g.row.Position
-		self:_tween(g.row, self:_info(0.5, Style.Quint, Direction.Out, 0, false, delay), {
-			Position = UDim2.new(pos.X.Scale, 20, pos.Y.Scale, pos.Y.Offset),
-		})
-		for _, label in ipairs(g.labels) do
-			self:_tween(label, self:_info(0.35, Style.Quad, Direction.Out, 0, false, delay), { TextTransparency = 0 })
-		end
+	for i, label in ipairs(self._brandLabels) do
+		self:_tween(label, self:_info(0.4, Style.Quad, Direction.Out, 0, false, 0.14 + (i - 1) * 0.06), { TextTransparency = 0 })
 	end
 end
 
@@ -1632,9 +1552,7 @@ end
 function KeyUI:_succeed(key)
 	self:_setStatus("valid")
 	self:_strokeTo("ok", 0)
-	if self._remember then
-		self:_writeSaved(key)
-	end
+	self:_writeSaved(key)
 
 	local delay = math.max(tonumber(self._opts.SuccessDelay) or 0, 0)
 	self._strip.Visible = true
