@@ -306,10 +306,30 @@ local function snap(value, min, max, step)
 	return value
 end
 
+local MOUSE_TYPES = {
+	[Enum.UserInputType.MouseButton1] = true,
+	[Enum.UserInputType.MouseButton2] = true,
+	[Enum.UserInputType.MouseButton3] = true,
+	[Enum.UserInputType.MouseMovement] = true,
+	[Enum.UserInputType.MouseWheel] = true,
+}
+
 local function pointer(input)
 	local p = input.Position
+	if MOUSE_TYPES[input.UserInputType] then
+		local m = UserInputService:GetMouseLocation()
+		S.pointerOffset = Vector2.new(m.X - p.X, m.Y - p.Y)
+		return m
+	end
+	local off = S.pointerOffset or GuiService:GetGuiInset()
+	return Vector2.new(p.X + off.X, p.Y + off.Y)
+end
+
+local function pointers(input)
+	local p = input.Position
 	local inset = GuiService:GetGuiInset()
-	return Vector2.new(p.X + inset.X, p.Y + inset.Y)
+	local out = { pointer(input), Vector2.new(p.X + inset.X, p.Y + inset.Y), Vector2.new(p.X, p.Y + 36), Vector2.new(p.X, p.Y) }
+	return out
 end
 
 local function over(gui, pos)
@@ -318,6 +338,15 @@ local function over(gui, pos)
 	end
 	local a, s = gui.AbsolutePosition, gui.AbsoluteSize
 	return pos.X >= a.X and pos.X <= a.X + s.X and pos.Y >= a.Y and pos.Y <= a.Y + s.Y
+end
+
+local function overAny(gui, list)
+	for _, pos in ipairs(list) do
+		if over(gui, pos) then
+			return true
+		end
+	end
+	return false
 end
 
 local function camera()
@@ -2030,6 +2059,31 @@ function Window:_search(text)
 	self:_applySearch(true)
 end
 
+local function searchContainer(c, prefix, tokens, active)
+	local count = 0
+	for _, el in ipairs(c._items) do
+		local match = (not active) or matches(prefix .. " " .. string.lower(el._search or ""), tokens)
+		el._match = match
+		el:_applyVisible()
+		if match and el._visible and not el._hiddenByDevice then
+			count = count + 1
+		end
+	end
+	for _, s in ipairs(c._sections) do
+		local n = searchContainer(s, prefix .. " " .. string.lower(s._name or ""), tokens, active)
+		if s._root then
+			s._root.Visible = s._visible and ((not active) or n > 0)
+		end
+		if s._collapse then
+			s._collapse.force(active and n > 0)
+		end
+		if s._visible then
+			count = count + n
+		end
+	end
+	return count
+end
+
 function Window:_applySearch(autoSwitch)
 	local tokens = searchTokens(self._query or "")
 	local active = #tokens > 0
@@ -2041,15 +2095,9 @@ function Window:_applySearch(autoSwitch)
 			local any = false
 			local containerHits = {}
 			for ci, c in ipairs(g.containers) do
-				local count = 0
-				for _, el in ipairs(c._items) do
-					local match = (not active) or matches(groupName .. " " .. string.lower(el._search or ""), tokens)
-					el._match = match
-					el:_applyVisible()
-					if match and el._visible and not el._hiddenByDevice then
-						any = true
-						count = count + 1
-					end
+				local count = searchContainer(c, groupName, tokens, active)
+				if count > 0 then
+					any = true
 				end
 				containerHits[ci] = count
 				if active then
@@ -2057,6 +2105,9 @@ function Window:_applySearch(autoSwitch)
 				end
 			end
 			g.frame.Visible = (not active) or any
+			if g.collapse then
+				g.collapse.force(active and any)
+			end
 			local tb = g.tabbox
 			if active and tb and tb._active then
 				local current = table.find(g.containers, tb._active.container)
@@ -2126,12 +2177,12 @@ function Window:_popup(anchor, width, height, build, onClose, ignore)
 		if t ~= MB1 and t ~= TOUCH and t ~= Enum.UserInputType.MouseButton2 then
 			return
 		end
-		local pos = pointer(input)
-		if over(group, pos) then
+		local pos = pointers(input)
+		if overAny(group, pos) then
 			return
 		end
 		for _, g in ipairs(p.ignore) do
-			if over(g, pos) then
+			if overAny(g, pos) then
 				return
 			end
 		end
@@ -2139,8 +2190,19 @@ function Window:_popup(anchor, width, height, build, onClose, ignore)
 	end)
 	local tab = self._current
 	if tab then
-		p.conns[#p.conns + 1] = tab._page:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
-			self:_closePopup()
+		local page = tab._page
+		p.conns[#p.conns + 1] = page:GetPropertyChangedSignal("CanvasPosition"):Connect(function()
+			if self._pop ~= p then
+				return
+			end
+			local a, s = anchor.AbsolutePosition, anchor.AbsoluteSize
+			local pa, ps = page.AbsolutePosition, page.AbsoluteSize
+			local cy = a.Y + s.Y / 2
+			if not anchor.Parent or cy < pa.Y or cy > pa.Y + ps.Y then
+				self:_closePopup()
+				return
+			end
+			self:_placePopup(p)
 		end)
 	end
 	if S.animate then
@@ -2527,15 +2589,214 @@ function Element:GetValue()
 	return self.Value
 end
 
-function Container.new(tab, group, body)
+local function makeCollapse(win, clip, measure, chevron, onShown)
+	local c = { open = true, forced = false, id = 0 }
+	local function shown()
+		return c.open or c.forced
+	end
+	c.shown = shown
+	function c.apply(animated)
+		c.id = c.id + 1
+		local id = c.id
+		local on = shown()
+		if chevron then
+			if animated and S.animate then
+				tween(chevron, info(0.25, Style.Quint, Direction.Out), { Rotation = on and 0 or -90 })
+			else
+				chevron.Rotation = on and 0 or -90
+			end
+		end
+		if onShown then
+			onShown(on, animated)
+		end
+		if not animated or not S.animate or not clip.Parent then
+			clip.AutomaticSize = on and Enum.AutomaticSize.Y or Enum.AutomaticSize.None
+			clip.Size = UDim2.new(1, 0, 0, 0)
+			clip.Visible = on
+			return
+		end
+		local scale = win._fit.Scale > 0 and win._fit.Scale or 1
+		local current = clip.Visible and clip.AbsoluteSize.Y / scale or 0
+		clip.AutomaticSize = Enum.AutomaticSize.None
+		clip.Size = UDim2.new(1, 0, 0, current)
+		clip.Visible = true
+		local target = on and measure() / scale or 0
+		if on and target <= 0 then
+			clip.AutomaticSize = Enum.AutomaticSize.Y
+			clip.Size = UDim2.new(1, 0, 0, 0)
+			return
+		end
+		local duration = on and 0.3 or 0.22
+		tween(clip, info(duration, Style.Quint, Direction.Out), { Size = UDim2.new(1, 0, 0, target) })
+		task.delay(duration / S.speed, function()
+			if c.id ~= id or not clip.Parent then
+				return
+			end
+			if on then
+				clip.AutomaticSize = Enum.AutomaticSize.Y
+				clip.Size = UDim2.new(1, 0, 0, 0)
+			else
+				clip.Visible = false
+			end
+		end)
+	end
+	function c.set(v, animated)
+		v = v ~= false
+		if c.open == v then
+			return
+		end
+		c.open = v
+		c.apply(animated ~= false)
+	end
+	function c.force(v)
+		v = v == true
+		if c.forced == v then
+			return
+		end
+		local before = shown()
+		c.forced = v
+		if shown() ~= before then
+			c.apply(false)
+		end
+	end
+	return c
+end
+
+function Container.new(tab, group, body, entry)
 	return setmetatable({
 		_tab = tab,
 		_win = tab._win,
 		_group = group,
 		_body = body,
+		_entry = entry,
 		_items = {},
+		_sections = {},
 		_order = 0,
 	}, Container)
+end
+
+function Container:SetCollapsed(v, animated)
+	if self._collapse then
+		self._collapse.set(v ~= true, animated)
+	end
+	return self
+end
+
+function Container:IsCollapsed()
+	return self._collapse ~= nil and not self._collapse.open
+end
+
+function Container:ToggleCollapsed(animated)
+	if self._collapse then
+		self._collapse.set(not self._collapse.open, animated)
+	end
+	return self
+end
+
+function Container:AddSection(name, options)
+	if type(name) == "table" then
+		options = name
+		name = options.Name or options.Title
+	end
+	options = options or {}
+	name = tostring(name or "")
+	local root = frame({
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		LayoutOrder = self:_next(),
+	}, self._body)
+	list(root, false, 0)
+	local collapsible = options.Collapsible ~= false
+	local headH = rowHeight(26, 32)
+	local header = button({ LayoutOrder = 1, Size = UDim2.new(1, 0, 0, headH) }, root)
+	local x = 0
+	local chev
+	if collapsible then
+		chev = icon("chevron", header, 12, "tx3")
+		chev.AnchorPoint = Vector2.new(0, 0.5)
+		chev.Position = UDim2.new(0, 0, 0.5, 0)
+		x = 18
+	end
+	local ic
+	if options.Icon then
+		ic = icon(options.Icon, header, 13, "tx2")
+		ic.AnchorPoint = Vector2.new(0, 0.5)
+		ic.Position = UDim2.new(0, x, 0.5, 0)
+		x = x + 19
+	end
+	local title = label({
+		Position = UDim2.fromOffset(x, 0),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.new(0, 0, 1, 0),
+		Text = name,
+		TextSize = 12,
+		FontFace = F_SEMI,
+		TextColor3 = tok.tx2,
+		TextTruncate = Enum.TextTruncate.None,
+	}, header)
+	local rule = frame({
+		AnchorPoint = Vector2.new(0, 0.5),
+		Position = UDim2.new(0, x, 0.5, 0),
+		Size = UDim2.new(1, -x, 0, 1),
+		BackgroundColor3 = tok.line,
+	}, header)
+	local function placeRule()
+		local w = title.AbsoluteSize.X / (self._win._fit.Scale > 0 and self._win._fit.Scale or 1)
+		local left = x + (name ~= "" and w + 10 or 0)
+		rule.Position = UDim2.new(0, left, 0.5, 0)
+		rule.Size = UDim2.new(1, -left, 0, 1)
+	end
+	connect(title:GetPropertyChangedSignal("AbsoluteSize"), placeRule)
+	placeRule()
+	local clip = frame({
+		LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		ClipsDescendants = true,
+	}, root)
+	frame({
+		Position = UDim2.fromOffset(5, 6),
+		Size = UDim2.new(0, 1, 1, -6),
+		BackgroundColor3 = tok.line,
+	}, clip)
+	local body = frame({
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+	}, clip)
+	pad(body, 6, 0, 2, 16)
+	list(body, false, 10)
+	local c = Container.new(self._tab, self._group, body, self._entry)
+	c._name = name
+	c._root = root
+	c._parent = self
+	c._visible = options.Visible ~= false
+	root.Visible = c._visible
+	self._sections[#self._sections + 1] = c
+	if collapsible then
+		c._collapse = makeCollapse(self._win, clip, function()
+			return body.AbsoluteSize.Y
+		end, chev, function(on)
+			paint(title, "TextColor3", on and "tx2" or "tx3", true)
+		end)
+		hover(header, function(on)
+			paint(title, "TextColor3", on and "tx" or (c._collapse.shown() and "tx2" or "tx3"), true)
+		end)
+		connect(header.Activated, function()
+			c._collapse.set(not c._collapse.open, true)
+		end)
+		if options.Collapsed == true or options.Open == false then
+			c._collapse.set(false, false)
+		end
+	end
+	return c
+end
+
+function Container:SetSectionVisible(v)
+	if self._root then
+		self._visible = v ~= false
+		self._root.Visible = self._visible
+	end
+	return self
 end
 
 function Container:_next()
@@ -2593,9 +2854,76 @@ function Tab:_groupFrame(side)
 	corner(box, 8)
 	stroke(box, "line")
 	list(box, false, 0)
-	local header = frame({ LayoutOrder = 1, Size = UDim2.new(1, 0, 0, 34) }, box)
-	frame({ Position = UDim2.new(0, 0, 1, -1), Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = tok.line }, header)
-	return box, header
+	local header = button({ LayoutOrder = 1, Size = UDim2.new(1, 0, 0, rowHeight(42, 46)) }, box)
+	local divider = frame({ Position = UDim2.new(0, 0, 1, -1), Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = tok.line }, header)
+	local clip = frame({
+		LayoutOrder = 2,
+		Size = UDim2.new(1, 0, 0, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		ClipsDescendants = true,
+	}, box)
+	local layout = list(clip, false, 0)
+	return box, header, clip, layout, divider
+end
+
+function Tab:_groupHeader(header, options, rightInset)
+	local name = tostring(options.Name or options.Title or "")
+	local x = 14
+	local ic
+	if options.Icon then
+		ic = icon(options.Icon, header, 16, "accent")
+		ic.AnchorPoint = Vector2.new(0, 0.5)
+		ic.Position = UDim2.new(0, x, 0.5, 0)
+		x = x + 24
+	end
+	local title
+	if name ~= "" then
+		title = label({
+			Position = UDim2.fromOffset(x, 0),
+			Size = UDim2.new(1, -(x + rightInset), 1, 0),
+			Text = name,
+			TextSize = 14,
+			FontFace = F_SEMI,
+		}, header)
+	end
+	local chev, chevSet
+	if options.Collapsible ~= false then
+		chev, chevSet = icon("chevron", header, 14, "tx3")
+		chev.AnchorPoint = Vector2.new(1, 0.5)
+		chev.Position = UDim2.new(1, -12, 0.5, 0)
+	end
+	return name, title, chev, chevSet
+end
+
+function Tab:_groupCollapse(c, options, header, clip, layout, divider, chev, chevSet, entry)
+	if options.Collapsible == false then
+		return
+	end
+	local col = makeCollapse(self._win, clip, function()
+		return layout.AbsoluteContentSize.Y
+	end, chev, function(on, animated)
+		if animated and S.animate then
+			tween(divider, quick(), { BackgroundTransparency = on and 0 or 1 })
+		else
+			divider.BackgroundTransparency = on and 0 or 1
+		end
+	end)
+	entry.collapse = col
+	if c then
+		c._collapse = col
+	end
+	if chevSet then
+		hover(header, function(on)
+			chevSet(on and "tx" or "tx3", true)
+		end)
+	end
+	connect(header.Activated, function()
+		col.set(not col.open, true)
+	end)
+	if options.Collapsed == true or options.Open == false then
+		col.set(false, false)
+	end
+	return col
 end
 
 function Tab:AddGroupbox(options)
@@ -2603,27 +2931,37 @@ function Tab:AddGroupbox(options)
 		options = { Name = options }
 	end
 	options = options or {}
-	local name = tostring(options.Name or options.Title or "")
-	local box, header = self:_groupFrame(options.Side)
-	label({
-		Position = UDim2.fromOffset(12, 0),
-		Size = UDim2.new(1, -24, 1, 0),
-		Text = name,
-		TextSize = 12,
-		FontFace = F_SEMI,
-	}, header)
-	local body = self:_body(box, 2)
-	local c = Container.new(self, box, body)
-	self._groups[#self._groups + 1] = { frame = box, name = name, containers = { c } }
+	local box, header, clip, layout, divider = self:_groupFrame(options.Side)
+	local name, _, chev, chevSet = self:_groupHeader(header, options, options.Collapsible ~= false and 36 or 14)
+	local body = self:_body(clip, 1)
+	local entry = { frame = box, name = name, containers = {} }
+	local c = Container.new(self, box, body, entry)
+	entry.containers[1] = c
+	self._groups[#self._groups + 1] = entry
+	self:_groupCollapse(c, options, header, clip, layout, divider, chev, chevSet, entry)
 	return c
 end
 
-function Tab:AddLeftGroupbox(name)
-	return self:AddGroupbox({ Name = name, Side = "Left" })
+function Tab:AddLeftGroupbox(name, options)
+	if type(name) == "table" then
+		options = name
+	else
+		options = options or {}
+		options.Name = name
+	end
+	options.Side = "Left"
+	return self:AddGroupbox(options)
 end
 
-function Tab:AddRightGroupbox(name)
-	return self:AddGroupbox({ Name = name, Side = "Right" })
+function Tab:AddRightGroupbox(name, options)
+	if type(name) == "table" then
+		options = name
+	else
+		options = options or {}
+		options.Name = name
+	end
+	options.Side = "Right"
+	return self:AddGroupbox(options)
 end
 
 local Tabbox = {}
@@ -2634,44 +2972,66 @@ function Tab:AddTabbox(options)
 		options = { Name = options }
 	end
 	options = options or {}
-	local name = tostring(options.Name or options.Title or "")
-	local box, header = self:_groupFrame(options.Side)
-	if name ~= "" then
-		label({
-			Position = UDim2.fromOffset(12, 0),
-			Size = UDim2.new(0.5, -12, 1, 0),
-			Text = name,
-			TextSize = 12,
-			FontFace = F_SEMI,
-		}, header)
+	local box, header, clip, layout, divider = self:_groupFrame(options.Side)
+	local collapsible = options.Collapsible ~= false
+	local name, title, chev, chevSet = self:_groupHeader(header, options, 14)
+	if title then
+		title.Size = UDim2.new(0.45, -title.Position.X.Offset, 1, 0)
 	end
+	local right = collapsible and 34 or 10
 	local buttons = frame({
 		AnchorPoint = Vector2.new(name ~= "" and 1 or 0, 0.5),
-		Position = name ~= "" and UDim2.new(1, -8, 0.5, 0) or UDim2.new(0, 8, 0.5, 0),
+		Position = name ~= "" and UDim2.new(1, -right, 0.5, 0) or UDim2.new(0, 10, 0.5, 0),
 		AutomaticSize = Enum.AutomaticSize.X,
 		Size = UDim2.fromOffset(0, 24),
 	}, header)
 	list(buttons, true, 2, nil, Enum.VerticalAlignment.Center)
 	local entry = { frame = box, name = name, containers = {} }
 	self._groups[#self._groups + 1] = entry
-	local tb = setmetatable({ _tab = self, _box = box, _buttons = buttons, _subs = {}, _entry = entry }, Tabbox)
+	local tb = setmetatable({ _tab = self, _box = box, _clip = clip, _buttons = buttons, _subs = {}, _entry = entry }, Tabbox)
 	entry.tabbox = tb
+	tb._collapse = self:_groupCollapse(nil, options, header, clip, layout, divider, chev, chevSet, entry)
 	return tb
 end
 
-function Tab:AddLeftTabbox(name)
-	return self:AddTabbox({ Name = name, Side = "Left" })
+function Tab:AddLeftTabbox(name, options)
+	if type(name) == "table" then
+		options = name
+	else
+		options = options or {}
+		options.Name = name
+	end
+	options.Side = "Left"
+	return self:AddTabbox(options)
 end
 
-function Tab:AddRightTabbox(name)
-	return self:AddTabbox({ Name = name, Side = "Right" })
+function Tab:AddRightTabbox(name, options)
+	if type(name) == "table" then
+		options = name
+	else
+		options = options or {}
+		options.Name = name
+	end
+	options.Side = "Right"
+	return self:AddTabbox(options)
+end
+
+function Tabbox:SetCollapsed(v, animated)
+	if self._collapse then
+		self._collapse.set(v ~= true, animated)
+	end
+	return self
+end
+
+function Tabbox:IsCollapsed()
+	return self._collapse ~= nil and not self._collapse.open
 end
 
 function Tabbox:AddTab(name)
 	local index = #self._subs + 1
-	local body = self._tab:_body(self._box, index + 1)
+	local body = self._tab:_body(self._clip, index)
 	body.Visible = index == 1
-	local c = Container.new(self._tab, self._box, body)
+	local c = Container.new(self._tab, self._box, body, self._entry)
 	local b = button({
 		LayoutOrder = index,
 		AutomaticSize = Enum.AutomaticSize.X,
@@ -2690,6 +3050,9 @@ function Tabbox:AddTab(name)
 	self._entry.containers[#self._entry.containers + 1] = c
 	connect(b.Activated, function()
 		self:_select(sub)
+		if self._collapse and not self._collapse.open then
+			self._collapse.set(true, true)
+		end
 	end)
 	if index == 1 then
 		self:_select(sub)
@@ -4080,7 +4443,7 @@ function Keybind:_capture(input)
 		self:SetValue(t)
 		self:_stopListen()
 	elseif t == MB1 or t == TOUCH then
-		if not over(self._chip, pointer(input)) then
+		if not overAny(self._chip, pointers(input)) then
 			self:_stopListen()
 		end
 	end
