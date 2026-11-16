@@ -5,6 +5,8 @@ local Workspace = game:GetService("Workspace")
 local GuiService = game:GetService("GuiService")
 local UserInputService = game:GetService("UserInputService")
 
+local LocalPlayer = Players.LocalPlayer
+
 local function defaultParent()
 	if typeof(gethui) == "function" then
 		local ok, container = pcall(gethui)
@@ -22,12 +24,13 @@ local function defaultParent()
 	if ok and core then
 		return core
 	end
-	return Players.LocalPlayer:WaitForChild("PlayerGui")
+	return LocalPlayer:WaitForChild("PlayerGui")
 end
 
 local THEMES = {
 	Dark = {
 		bg = Color3.fromHex("0C0C0E"),
+		side = Color3.fromHex("101013"),
 		box = Color3.fromHex("17171B"),
 		el = Color3.fromHex("1F1F24"),
 		el2 = Color3.fromHex("29292F"),
@@ -36,11 +39,18 @@ local THEMES = {
 		tx = Color3.fromHex("EDEDF0"),
 		tx2 = Color3.fromHex("A6A6B0"),
 		tx3 = Color3.fromHex("85858F"),
+		segOn = Color3.fromHex("36363E"),
+		knobOff = Color3.fromHex("85858F"),
+		boxFlat = Color3.fromHex("121216"),
+		lineStrong = Color3.fromHex("2A2A32"),
 		danger = Color3.fromHex("FF6B6B"),
 		ok = Color3.fromHex("3DCB7A"),
+		info = Color3.fromHex("4C8DFF"),
+		warn = Color3.fromHex("F5B941"),
 	},
 	Light = {
 		bg = Color3.fromHex("F4F4F2"),
+		side = Color3.fromHex("EDEDEA"),
 		box = Color3.fromHex("FFFFFF"),
 		el = Color3.fromHex("F1F1EE"),
 		el2 = Color3.fromHex("E6E6E2"),
@@ -49,8 +59,14 @@ local THEMES = {
 		tx = Color3.fromHex("16161A"),
 		tx2 = Color3.fromHex("52525B"),
 		tx3 = Color3.fromHex("686871"),
+		segOn = Color3.fromHex("FFFFFF"),
+		knobOff = Color3.fromHex("9A9AA2"),
+		boxFlat = Color3.fromHex("F8F8F6"),
+		lineStrong = Color3.fromHex("D5D5D0"),
 		danger = Color3.fromHex("C93439"),
 		ok = Color3.fromHex("1F9D57"),
+		info = Color3.fromHex("2F6FE0"),
+		warn = Color3.fromHex("B7791F"),
 	},
 }
 
@@ -105,6 +121,7 @@ local DEFAULTS = {
 	AutoProgress = true,
 	AutoFinish = true,
 	FinishDelay = 0.6,
+	FailDelay = false,
 	Animations = true,
 	AnimationSpeed = 1,
 	Shimmer = true,
@@ -276,6 +293,7 @@ end
 
 local Loading = {}
 Loading.__index = Loading
+Loading.Version = "1.3.0"
 Loading.Themes = THEMES
 Loading.Fonts = FONTS
 
@@ -314,6 +332,7 @@ function Loading.new(options)
 
 	self.Finished = Signal.new()
 	self.Failed = Signal.new()
+	self.Done = Signal.new()
 	if type(opts.OnFinished) == "function" then
 		self.Finished:Connect(opts.OnFinished)
 	end
@@ -1211,6 +1230,19 @@ function Loading:Fail(message)
 	self:_bindTween(self._percent, "TextColor3", "danger")
 	self:_shake()
 	self.Failed:Fire(self._status.Text)
+	self.Done:Fire(false)
+	local delay = tonumber(self._opts.FailDelay)
+	if delay then
+		task.delay(math.max(delay, 0), function()
+			if self._destroyed then
+				return
+			end
+			task.spawn(function()
+				self:_close()
+				self:Destroy()
+			end)
+		end)
+	end
 	return self
 end
 
@@ -1236,6 +1268,7 @@ function Loading:Finish(noYield)
 		self:_close()
 		self:Destroy()
 		self.Finished:Fire()
+		self.Done:Fire(true)
 	end
 
 	if noYield then
@@ -1246,10 +1279,13 @@ function Loading:Finish(noYield)
 end
 
 function Loading:Wait()
-	if self._destroyed then
-		return
+	if self._finished then
+		return true
 	end
-	self.Finished:Wait()
+	if self._failed or self._destroyed then
+		return false
+	end
+	return self.Done:Wait()
 end
 
 function Loading:SetTheme(theme)
@@ -1320,6 +1356,11 @@ function Loading:Destroy()
 	table.clear(self._loops)
 	table.clear(self._themed)
 	table.clear(self._fonted)
+
+	if not self._finished and not self._failed then
+		self._failed = true
+		self.Done:Fire(false)
+	end
 end
 
 return Loading
