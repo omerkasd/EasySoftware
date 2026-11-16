@@ -165,7 +165,7 @@ local api = {
 }
 
 local Library = {
-	Version = "1.4.0",
+	Version = "1.4.1",
 	Flags = {},
 	Options = {},
 	Toggles = {},
@@ -200,6 +200,8 @@ local S = {
 	unload = {},
 	keybinds = {},
 	keyMap = {},
+	uiScale = 1,
+	overlayScales = {},
 	settings = {},
 	settingsDirty = {},
 	hud = {},
@@ -822,6 +824,23 @@ local function connect(signal, f)
 	local bucket = S.collect or S.conns
 	bucket[#bucket + 1] = c
 	return c
+end
+
+local function scaleOverlay(target)
+	local scale = new("UIScale", { Scale = S.uiScale or 1 }, target)
+	S.overlayScales[#S.overlayScales + 1] = scale
+	return scale
+end
+
+local function applyOverlayScale()
+	for index = #S.overlayScales, 1, -1 do
+		local scale = S.overlayScales[index]
+		if scale.Parent == nil then
+			table.remove(S.overlayScales, index)
+		else
+			scale.Scale = S.uiScale or 1
+		end
+	end
 end
 
 local function hover(target, f)
@@ -1494,6 +1513,8 @@ local function clearState()
 	table.clear(S.conns)
 	table.clear(S.drags)
 	S.keyMap = {}
+	S.uiScale = 1
+	S.overlayScales = {}
 	S.settings = {}
 	S.settingsDirty = {}
 	S.settingsLoading = false
@@ -2079,6 +2100,7 @@ function Window:_buildPill()
 	}, self._gui)
 	corner(pill, D.rWin)
 	stroke(pill, "line2")
+	scaleOverlay(pill)
 	pad(pill, 0, 12, 0, 8)
 	list(pill, true, 10, nil, Enum.VerticalAlignment.Center)
 	logoMark(pill, 22, 6, opts.Logo, opts.Title)
@@ -2103,16 +2125,19 @@ function Window:_buildPill()
 	self._pill = pill
 end
 
+local BAR_H, BAR_BTN, BAR_ICON = 40, 32, 18
+local BAR_H_MOBILE, BAR_BTN_MOBILE, BAR_ICON_MOBILE = 50, 40, 22
+
 function Window:_barButton(parent, order, iconName, labelText, onClick)
-	local size = (S.mobile and D.header or D.header - 6) - 6
+	local size = S.mobile and BAR_BTN_MOBILE or BAR_BTN
 	local b = button({
 		LayoutOrder = order,
 		Size = UDim2.fromOffset(size, size),
 		BackgroundColor3 = tok.el,
 		BackgroundTransparency = 1,
 	}, parent)
-	corner(b, D.rSmall)
-	local ic, setIcon = icon(iconName, b, D.iconSm, "tx3")
+	corner(b, D.rCtrl)
+	local ic, setIcon = icon(iconName, b, (S.mobile and BAR_ICON_MOBILE or BAR_ICON) / D.iconScale, "tx3")
 	ic.AnchorPoint = Vector2.new(0.5, 0.5)
 	ic.Position = UDim2.fromScale(0.5, 0.5)
 	local entry = { button = b, setIcon = setIcon, active = false, hover = false }
@@ -2141,20 +2166,20 @@ end
 function Window:_barRow(parent, order, text, onClick)
 	local row = button({
 		LayoutOrder = order,
-		Size = UDim2.new(1, 0, 0, D.checkRow + 4),
+		Size = UDim2.new(1, 0, 0, 26),
 		BackgroundColor3 = tok.el,
 		BackgroundTransparency = 1,
 	}, parent)
 	corner(row, D.rTiny)
 	list(row, true, D.rowGap, nil, Enum.VerticalAlignment.Center)
 	pad(row, 0, 6, 0, 6)
-	local box = frame({ LayoutOrder = 1, Size = UDim2.fromOffset(D.checkBox, D.checkBox), BackgroundColor3 = tok.el }, row)
+	local box = frame({ LayoutOrder = 1, Size = UDim2.fromOffset(16, 16), BackgroundColor3 = tok.el }, row)
 	corner(box, D.rTiny)
 	local boxStroke = stroke(box, "line2")
-	local mark = icon("check", box, math.floor(D.checkBox * 0.75 + 0.5) / D.iconScale, "onAccent")
+	local mark = icon("check", box, 12 / D.iconScale, "onAccent")
 	mark.AnchorPoint = Vector2.new(0.5, 0.5)
 	mark.Position = UDim2.fromScale(0.5, 0.5)
-	local text2 = label({ LayoutOrder = 2, Size = UDim2.new(0, 0, 1, 0), Text = text, TextSize = D.fLabel }, row)
+	local text2 = label({ LayoutOrder = 2, Size = UDim2.new(0, 0, 1, 0), Text = text, TextSize = 13 }, row)
 	fill(text2)
 	local entry = { row = row, on = false }
 	function entry.paint(animated)
@@ -2172,7 +2197,7 @@ end
 
 function Window:_buildTopBar()
 	local gui = self._gui
-	local h = S.mobile and D.header or (D.header - 6)
+	local h = S.mobile and BAR_H_MOBILE or BAR_H
 	local bar = frame({
 		Name = "TopBar",
 		AnchorPoint = Vector2.new(0.5, 0),
@@ -2183,16 +2208,17 @@ function Window:_buildTopBar()
 		ZIndex = 32,
 		Active = true,
 	}, gui)
-	corner(bar, D.rCtrl)
+	corner(bar, D.rBox)
 	stroke(bar, "line2")
-	pad(bar, 3, 3, 3, 3)
-	list(bar, true, 3, nil, Enum.VerticalAlignment.Center)
+	scaleOverlay(bar)
+	pad(bar, 4, 4, 4, 4)
+	list(bar, true, 4, nil, Enum.VerticalAlignment.Center)
 
 	local panel = frame({
 		Name = "TopBarMenu",
 		AnchorPoint = Vector2.new(0.5, 0),
 		Position = UDim2.new(0.5, 0, 0, overlayTop() + h + 5),
-		Size = UDim2.fromOffset(S.mobile and 220 or 190, 0),
+		Size = UDim2.fromOffset(S.mobile and 240 or 210, 0),
 		AutomaticSize = Enum.AutomaticSize.Y,
 		BackgroundColor3 = tok.bg,
 		ZIndex = 33,
@@ -2201,8 +2227,9 @@ function Window:_buildTopBar()
 	}, gui)
 	corner(panel, D.rBox)
 	stroke(panel, "line2")
-	pad(panel, 5, 5, 6, 5)
-	list(panel, false, 3)
+	scaleOverlay(panel)
+	pad(panel, 7, 7, 8, 7)
+	list(panel, false, 4)
 
 	local bar3 = {}
 	bar3.main = self:_barButton(bar, 1, "grid", "Interface", function()
@@ -2223,19 +2250,19 @@ function Window:_buildTopBar()
 		Library:SetArrayListVisible(not Library:IsArrayListVisible())
 	end)
 
-	local cornerRow = frame({ LayoutOrder = 3, Size = UDim2.new(1, 0, 0, D.checkRow + 4) }, panel)
-	list(cornerRow, true, 3, nil, Enum.VerticalAlignment.Center)
+	local cornerRow = frame({ LayoutOrder = 3, Size = UDim2.new(1, 0, 0, 26) }, panel)
+	list(cornerRow, true, 4, nil, Enum.VerticalAlignment.Center)
 	pad(cornerRow, 0, 6, 0, 6)
-	label({ LayoutOrder = 1, Size = UDim2.new(0, 0, 1, 0), Text = "Corner", TextSize = D.fLabel, TextColor3 = tok.tx2 }, cornerRow)
+	label({ LayoutOrder = 1, Size = UDim2.new(0, 0, 1, 0), Text = "Corner", TextSize = 13, TextColor3 = tok.tx2 }, cornerRow)
 	bar3.corners = {}
 	for index, name in ipairs({ "TopLeft", "TopRight", "BottomLeft", "BottomRight" }) do
 		local short = ({ "TL", "TR", "BL", "BR" })[index]
 		local b = button({
 			LayoutOrder = index + 1,
-			Size = UDim2.fromOffset(22, D.checkBox + 3),
+			Size = UDim2.fromOffset(26, 20),
 			BackgroundColor3 = tok.el,
 			Text = short,
-			TextSize = D.fTiny,
+			TextSize = 11,
 			FontFace = F_MONO,
 			TextColor3 = tok.tx3,
 		}, cornerRow)
@@ -2303,6 +2330,7 @@ function Window:_buildMobileButton()
 	}, self._gui)
 	corner(btn, D.rMobileBtn)
 	stroke(btn, "line2")
+	scaleOverlay(btn)
 	local mark = logoMark(btn, 30, 8, opts.Logo, opts.Title)
 	mark.AnchorPoint = Vector2.new(0.5, 0.5)
 	mark.Position = UDim2.fromScale(0.5, 0.5)
@@ -2502,7 +2530,10 @@ end
 
 function Window:SetScale(scale)
 	self._userScale = math.clamp(tonumber(scale) or 1, 0.5, 2)
+	S.uiScale = self._userScale
+	applyOverlayScale()
 	self:_relayout()
+	Library:_placeOverlays()
 	return self
 end
 
@@ -6111,7 +6142,7 @@ function Library:_placeOverlays()
 	if S.wm and not S.wmMoved then
 		S.wm.Position = UDim2.fromOffset(16, y)
 		if S.wm.Visible then
-			y = y + 38
+			y = y + math.floor(38 * (S.uiScale or 1))
 		end
 	end
 	if S.kbl and not S.kblMoved then
@@ -6119,7 +6150,8 @@ function Library:_placeOverlays()
 	end
 	if S.al and not S.alMoved then
 		local vp = viewport()
-		local size = S.al.Size
+		local scale = S.uiScale or 1
+		local size = UDim2.fromOffset(S.al.Size.X.Offset * scale, S.al.Size.Y.Offset * scale)
 		local corner = S.alCorner or "TopRight"
 		local left = corner == "TopLeft" or corner == "BottomLeft"
 		local top = corner == "TopLeft" or corner == "TopRight"
@@ -6129,6 +6161,7 @@ function Library:_placeOverlays()
 		)
 	end
 end
+
 
 local function draggable(target, movedKey)
 	local start, origin
@@ -6238,6 +6271,7 @@ function Library:_renderArrayList()
 			ZIndex = 38,
 			Active = true,
 		}, rootGui())
+		scaleOverlay(S.al)
 		draggable(S.al, "alMoved")
 		S.alRows = {}
 	end
@@ -6334,6 +6368,7 @@ function Library:SetWatermarkVisible(on)
 			Active = true,
 		}, gui)
 		corner(wm, D.rCtrl)
+		scaleOverlay(wm)
 		draggable(wm, "wmMoved")
 		stroke(wm, "line2")
 		pad(wm, 0, 12, 0, 8)
@@ -6463,6 +6498,7 @@ function Library:_renderKeybinds()
 			Active = true,
 		}, gui)
 		corner(panel, D.rBox)
+		scaleOverlay(panel)
 		draggable(panel, "kblMoved")
 		stroke(panel, "line2")
 		list(panel, false, 0)
