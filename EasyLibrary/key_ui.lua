@@ -5,6 +5,8 @@ local Lighting = game:GetService("Lighting")
 local Workspace = game:GetService("Workspace")
 local GuiService = game:GetService("GuiService")
 
+local LocalPlayer = Players.LocalPlayer
+
 local function defaultParent()
 	if typeof(gethui) == "function" then
 		local ok, container = pcall(gethui)
@@ -22,7 +24,7 @@ local function defaultParent()
 	if ok and core then
 		return core
 	end
-	return Players.LocalPlayer:WaitForChild("PlayerGui")
+	return LocalPlayer:WaitForChild("PlayerGui")
 end
 
 local THEMES = {
@@ -37,8 +39,14 @@ local THEMES = {
 		tx = Color3.fromHex("EDEDF0"),
 		tx2 = Color3.fromHex("A6A6B0"),
 		tx3 = Color3.fromHex("85858F"),
+		segOn = Color3.fromHex("36363E"),
+		knobOff = Color3.fromHex("85858F"),
+		boxFlat = Color3.fromHex("121216"),
+		lineStrong = Color3.fromHex("2A2A32"),
 		danger = Color3.fromHex("FF6B6B"),
 		ok = Color3.fromHex("3DCB7A"),
+		info = Color3.fromHex("4C8DFF"),
+		warn = Color3.fromHex("F5B941"),
 	},
 	Light = {
 		bg = Color3.fromHex("F4F4F2"),
@@ -51,8 +59,14 @@ local THEMES = {
 		tx = Color3.fromHex("16161A"),
 		tx2 = Color3.fromHex("52525B"),
 		tx3 = Color3.fromHex("686871"),
+		segOn = Color3.fromHex("FFFFFF"),
+		knobOff = Color3.fromHex("9A9AA2"),
+		boxFlat = Color3.fromHex("F8F8F6"),
+		lineStrong = Color3.fromHex("D5D5D0"),
 		danger = Color3.fromHex("C93439"),
 		ok = Color3.fromHex("1F9D57"),
+		info = Color3.fromHex("2F6FE0"),
+		warn = Color3.fromHex("B7791F"),
 	},
 }
 
@@ -190,9 +204,24 @@ local api = {
 	delfile = typeof(delfile) == "function" and delfile or nil,
 	isfolder = typeof(isfolder) == "function" and isfolder or nil,
 	makefolder = typeof(makefolder) == "function" and makefolder or nil,
+	listfiles = typeof(listfiles) == "function" and listfiles or nil,
 	setclipboard = (typeof(setclipboard) == "function" and setclipboard) or (typeof(toclipboard) == "function" and toclipboard) or nil,
 	getclipboard = typeof(getclipboard) == "function" and getclipboard or nil,
 }
+
+local function ensureFolder(path)
+	if not api.isfolder or not api.makefolder then
+		return
+	end
+	local current = ""
+	for part in string.gmatch(path, "[^/]+") do
+		current = current == "" and part or (current .. "/" .. part)
+		local ok, exists = pcall(api.isfolder, current)
+		if ok and not exists then
+			pcall(api.makefolder, current)
+		end
+	end
+end
 
 local function luminance(c)
 	local function ch(v)
@@ -208,7 +237,9 @@ local DARK_TEXT_LUM = luminance(DARK_TEXT)
 
 local function textOn(c)
 	local l = luminance(c)
-	if (l + 0.05) / (DARK_TEXT_LUM + 0.05) >= 1.05 / (l + 0.05) then
+	local vsWhite = 1.05 / (l + 0.05)
+	local vsDark = (l + 0.05) / (DARK_TEXT_LUM + 0.05)
+	if vsDark >= vsWhite then
 		return DARK_TEXT
 	end
 	return WHITE
@@ -263,13 +294,13 @@ local function resolveTheme(theme)
 	return THEMES[theme] or THEMES.Dark
 end
 
-local function fmt(s, vars)
-	return (string.gsub(tostring(s or ""), "{(%w+)}", function(k)
-		local v = vars[k]
-		if v == nil then
-			return "{" .. k .. "}"
+local function template(str, vars)
+	return (string.gsub(tostring(str or ""), "{(%w+)}", function(key)
+		local value = vars[key]
+		if value == nil then
+			return "{" .. key .. "}"
 		end
-		return tostring(v)
+		return tostring(value)
 	end))
 end
 
@@ -324,6 +355,7 @@ end
 
 local KeyUI = {}
 KeyUI.__index = KeyUI
+KeyUI.Version = "1.3.0"
 KeyUI.Themes = THEMES
 KeyUI.Fonts = FONTS
 
@@ -1479,7 +1511,7 @@ function KeyUI:_setStatus(state, message)
 		text, token = message or "", "tx2"
 	end
 
-	self._statusText.Text = fmt(text, vars)
+	self._statusText.Text = template(text, vars)
 	self:_bindTween(self._statusText, "TextColor3", token)
 
 	self._statusSpinner.Visible = icon == "spin"
@@ -1499,7 +1531,7 @@ function KeyUI:_setStatus(state, message)
 	local showAttempts = state == "invalid" and max > 0
 	self._attemptsText.Visible = showAttempts
 	if showAttempts then
-		self._attemptsText.Text = fmt(texts.Attempts, vars)
+		self._attemptsText.Text = template(texts.Attempts, vars)
 	end
 
 	if changed and self._animate then
@@ -1663,7 +1695,7 @@ function KeyUI:_lock()
 			end
 			self._lockLeft = self._lockLeft - 1
 			if self._lockLeft > 0 then
-				self._statusText.Text = fmt(self._texts.Locked, { time = self._lockLeft })
+				self._statusText.Text = template(self._texts.Locked, { time = self._lockLeft })
 			end
 		end
 		self._attempts = 0
@@ -1709,7 +1741,7 @@ function KeyUI:_copy(text, which)
 		return
 	end
 	if self._state ~= "checking" and self._state ~= "valid" and self._state ~= "locked" then
-		self:_setStatus("info", fmt(self._texts.CopyFallback, { link = text }))
+		self:_setStatus("info", template(self._texts.CopyFallback, { link = text }))
 	end
 end
 
@@ -1725,10 +1757,6 @@ function KeyUI:_paste()
 		end
 	end
 	self._box:CaptureFocus()
-end
-
-function KeyUI:_folderOf(path)
-	return string.match(path, "^(.*)/[^/]*$")
 end
 
 function KeyUI:_readSaved()
@@ -1755,12 +1783,9 @@ function KeyUI:_writeSaved(key)
 		return
 	end
 	local path = tostring(self._opts.FileName)
-	local folder = self:_folderOf(path)
-	if folder and api.isfolder and api.makefolder then
-		local ok, exists = pcall(api.isfolder, folder)
-		if ok and not exists then
-			pcall(api.makefolder, folder)
-		end
+	local folder = string.match(path, "^(.*)/[^/]*$")
+	if folder then
+		ensureFolder(folder)
 	end
 	pcall(api.writefile, path, key)
 end
