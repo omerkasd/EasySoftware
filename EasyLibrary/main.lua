@@ -165,7 +165,7 @@ local api = {
 }
 
 local Library = {
-	Version = "1.3.0",
+	Version = "1.4.0",
 	Flags = {},
 	Options = {},
 	Toggles = {},
@@ -274,6 +274,8 @@ local DENSITY = {
 		narrowAt = 640,
 		singleAt = 520,
 		hudRow = 18,
+		profile = 42,
+		avatar = 30,
 		rowGap = 8,
 		iconScale = 1,
 		boxToken = "box",
@@ -341,6 +343,8 @@ local DENSITY = {
 		narrowAt = 540,
 		singleAt = 440,
 		hudRow = 14,
+		profile = 32,
+		avatar = 22,
 		rowGap = 6,
 		iconScale = 0.8,
 		boxToken = "boxFlat",
@@ -563,6 +567,10 @@ local function overAny(gui, list)
 		end
 	end
 	return false
+end
+
+local function overlayTop()
+	return GuiService:GetGuiInset().Y + 10
 end
 
 local function camera()
@@ -1563,6 +1571,7 @@ local WINDOW_DEFAULTS = {
 	KeybindList = false,
 	ArrayList = false,
 	ArrayListCorner = "TopRight",
+	TopBar = false,
 	Blur = false,
 	BlurSize = 12,
 	Animations = true,
@@ -1838,9 +1847,12 @@ function Window:_build()
 		end,
 	})
 
+	if opts.TopBar then
+		self:_buildTopBar()
+	end
 	if S.mobile then
 		self:_buildMobileButton()
-	else
+	elseif not opts.TopBar then
 		self:_buildPill()
 	end
 
@@ -1947,7 +1959,7 @@ function Window:_buildSidebar(main)
 
 	local hasSettings = opts.AutoSettings ~= false
 	local hasProfile = opts.Profile ~= false
-	local inner = (hasSettings and 34 or 0) + (hasProfile and 42 or 0) + ((hasSettings and hasProfile) and 6 or 0)
+	local inner = (hasSettings and D.sideRow or 0) + (hasProfile and D.profile or 0) + ((hasSettings and hasProfile) and 6 or 0)
 	local bottomH = inner > 0 and (inner + 14) or 0
 
 	local tabList = new("ScrollingFrame", {
@@ -1980,11 +1992,11 @@ function Window:_buildSidebar(main)
 end
 
 function Window:_buildProfile(parent)
-	local block = frame({ LayoutOrder = 2, Size = UDim2.new(1, 0, 0, 42) }, parent)
+	local block = frame({ LayoutOrder = 2, Size = UDim2.new(1, 0, 0, D.profile) }, parent)
 	frame({ Size = UDim2.new(1, 0, 0, 1), BackgroundColor3 = tok[D.lineToken] }, block)
-	local row = frame({ Position = UDim2.fromOffset(6, 11), Size = UDim2.new(1, -6, 0, 30) }, block)
+	local row = frame({ Position = UDim2.fromOffset(6, D.profile - D.avatar - 1), Size = UDim2.new(1, -6, 0, D.avatar) }, block)
 	local avatar = new("ImageLabel", {
-		Size = UDim2.fromOffset(30, 30),
+		Size = UDim2.fromOffset(D.avatar, D.avatar),
 		BackgroundColor3 = tok.el2,
 		BorderSizePixel = 0,
 		ScaleType = Enum.ScaleType.Crop,
@@ -1999,15 +2011,15 @@ function Window:_buildProfile(parent)
 		end
 	end)
 	local name = label({
-		Position = UDim2.fromOffset(40, 0),
-		Size = UDim2.new(1, -40, 0, 16),
+		Position = UDim2.fromOffset(D.avatar + 10, 0),
+		Size = UDim2.new(1, -(D.avatar + 10), 0, math.ceil(D.avatar / 2)),
 		Text = LocalPlayer.DisplayName,
 		TextSize = D.fLabel,
 		FontFace = F_SEMI,
 	}, row)
 	local user = label({
-		Position = UDim2.fromOffset(40, 16),
-		Size = UDim2.new(1, -40, 0, 14),
+		Position = UDim2.fromOffset(D.avatar + 10, math.ceil(D.avatar / 2)),
+		Size = UDim2.new(1, -(D.avatar + 10), 0, math.floor(D.avatar / 2)),
 		Text = "@" .. LocalPlayer.Name,
 		TextSize = D.fSmall,
 		TextColor3 = tok.tx3,
@@ -2089,6 +2101,194 @@ function Window:_buildPill()
 		self:SetVisible(true)
 	end)
 	self._pill = pill
+end
+
+function Window:_barButton(parent, order, iconName, labelText, onClick)
+	local size = (S.mobile and D.header or D.header - 6) - 6
+	local b = button({
+		LayoutOrder = order,
+		Size = UDim2.fromOffset(size, size),
+		BackgroundColor3 = tok.el,
+		BackgroundTransparency = 1,
+	}, parent)
+	corner(b, D.rSmall)
+	local ic, setIcon = icon(iconName, b, D.iconSm, "tx3")
+	ic.AnchorPoint = Vector2.new(0.5, 0.5)
+	ic.Position = UDim2.fromScale(0.5, 0.5)
+	local entry = { button = b, setIcon = setIcon, active = false, hover = false }
+	function entry.paint(animated)
+		if entry.active then
+			paint(b, "BackgroundColor3", "accent", animated)
+			b.BackgroundTransparency = 0
+			setIcon("onAccent", animated)
+			return
+		end
+		paint(b, "BackgroundColor3", "el", animated)
+		b.BackgroundTransparency = entry.hover and 0 or 1
+		setIcon(entry.hover and "tx" or "tx3", animated)
+	end
+	hover(b, function(on)
+		entry.hover = on
+		entry.paint(true)
+	end)
+	press(b, 0.92)
+	connect(b.Activated, onClick)
+	self:_tooltip(b, labelText)
+	entry.paint(false)
+	return entry
+end
+
+function Window:_barRow(parent, order, text, onClick)
+	local row = button({
+		LayoutOrder = order,
+		Size = UDim2.new(1, 0, 0, D.checkRow + 4),
+		BackgroundColor3 = tok.el,
+		BackgroundTransparency = 1,
+	}, parent)
+	corner(row, D.rTiny)
+	list(row, true, D.rowGap, nil, Enum.VerticalAlignment.Center)
+	pad(row, 0, 6, 0, 6)
+	local box = frame({ LayoutOrder = 1, Size = UDim2.fromOffset(D.checkBox, D.checkBox), BackgroundColor3 = tok.el }, row)
+	corner(box, D.rTiny)
+	local boxStroke = stroke(box, "line2")
+	local mark = icon("check", box, math.floor(D.checkBox * 0.75 + 0.5) / D.iconScale, "onAccent")
+	mark.AnchorPoint = Vector2.new(0.5, 0.5)
+	mark.Position = UDim2.fromScale(0.5, 0.5)
+	local text2 = label({ LayoutOrder = 2, Size = UDim2.new(0, 0, 1, 0), Text = text, TextSize = D.fLabel }, row)
+	fill(text2)
+	local entry = { row = row, on = false }
+	function entry.paint(animated)
+		paint(box, "BackgroundColor3", entry.on and "accent" or "el", animated)
+		paint(boxStroke, "Color", entry.on and "accent" or "line2", animated)
+		mark.Visible = entry.on
+	end
+	hover(row, function(on)
+		tween(row, quick(), { BackgroundTransparency = on and 0.5 or 1 })
+	end)
+	connect(row.Activated, onClick)
+	entry.paint(false)
+	return entry
+end
+
+function Window:_buildTopBar()
+	local gui = self._gui
+	local h = S.mobile and D.header or (D.header - 6)
+	local bar = frame({
+		Name = "TopBar",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, overlayTop()),
+		AutomaticSize = Enum.AutomaticSize.X,
+		Size = UDim2.fromOffset(0, h),
+		BackgroundColor3 = tok.bg,
+		ZIndex = 32,
+		Active = true,
+	}, gui)
+	corner(bar, D.rCtrl)
+	stroke(bar, "line2")
+	pad(bar, 3, 3, 3, 3)
+	list(bar, true, 3, nil, Enum.VerticalAlignment.Center)
+
+	local panel = frame({
+		Name = "TopBarMenu",
+		AnchorPoint = Vector2.new(0.5, 0),
+		Position = UDim2.new(0.5, 0, 0, overlayTop() + h + 5),
+		Size = UDim2.fromOffset(S.mobile and 220 or 190, 0),
+		AutomaticSize = Enum.AutomaticSize.Y,
+		BackgroundColor3 = tok.bg,
+		ZIndex = 33,
+		Visible = false,
+		Active = true,
+	}, gui)
+	corner(panel, D.rBox)
+	stroke(panel, "line2")
+	pad(panel, 5, 5, 6, 5)
+	list(panel, false, 3)
+
+	local bar3 = {}
+	bar3.main = self:_barButton(bar, 1, "grid", "Interface", function()
+		self:Toggle()
+	end)
+	bar3.keys = self:_barButton(bar, 2, "keyboard", "Keybind list", function()
+		Library:SetKeybindListVisible(not Library:IsKeybindListVisible())
+	end)
+	bar3.more = self:_barButton(bar, 3, "settings", "Overlays", function()
+		panel.Visible = not panel.Visible
+		self:_syncTopBar()
+	end)
+
+	bar3.watermark = self:_barRow(panel, 1, "Watermark", function()
+		Library:SetWatermarkVisible(not Library:IsWatermarkVisible())
+	end)
+	bar3.list = self:_barRow(panel, 2, "Module list", function()
+		Library:SetArrayListVisible(not Library:IsArrayListVisible())
+	end)
+
+	local cornerRow = frame({ LayoutOrder = 3, Size = UDim2.new(1, 0, 0, D.checkRow + 4) }, panel)
+	list(cornerRow, true, 3, nil, Enum.VerticalAlignment.Center)
+	pad(cornerRow, 0, 6, 0, 6)
+	label({ LayoutOrder = 1, Size = UDim2.new(0, 0, 1, 0), Text = "Corner", TextSize = D.fLabel, TextColor3 = tok.tx2 }, cornerRow)
+	bar3.corners = {}
+	for index, name in ipairs({ "TopLeft", "TopRight", "BottomLeft", "BottomRight" }) do
+		local short = ({ "TL", "TR", "BL", "BR" })[index]
+		local b = button({
+			LayoutOrder = index + 1,
+			Size = UDim2.fromOffset(22, D.checkBox + 3),
+			BackgroundColor3 = tok.el,
+			Text = short,
+			TextSize = D.fTiny,
+			FontFace = F_MONO,
+			TextColor3 = tok.tx3,
+		}, cornerRow)
+		corner(b, D.rTiny)
+		connect(b.Activated, function()
+			Library:SetArrayListCorner(name)
+			self:_syncTopBar()
+		end)
+		bar3.corners[name] = b
+	end
+
+	connect(UserInputService.InputBegan, function(input)
+		if not panel.Visible then
+			return
+		end
+		local t = input.UserInputType
+		if t ~= MB1 and t ~= TOUCH then
+			return
+		end
+		local positions = pointers(input)
+		if overAny(panel, positions) or overAny(bar, positions) then
+			return
+		end
+		panel.Visible = false
+		self:_syncTopBar()
+	end)
+
+	self._bar = bar
+	self._barMenu = panel
+	self._bar3 = bar3
+	self:_syncTopBar()
+end
+
+function Window:_syncTopBar()
+	local bar3 = self._bar3
+	if not bar3 then
+		return
+	end
+	bar3.main.active = self._visible
+	bar3.main.paint(true)
+	bar3.keys.active = Library:IsKeybindListVisible()
+	bar3.keys.paint(true)
+	bar3.more.active = self._barMenu ~= nil and self._barMenu.Visible
+	bar3.more.paint(true)
+	bar3.watermark.on = Library:IsWatermarkVisible()
+	bar3.watermark.paint(true)
+	bar3.list.on = Library:IsArrayListVisible()
+	bar3.list.paint(true)
+	local active = S.alCorner or "TopRight"
+	for name, b in pairs(bar3.corners) do
+		paint(b, "BackgroundColor3", name == active and "accent" or "el", true)
+		paint(b, "TextColor3", name == active and "onAccent" or "tx3", true)
+	end
 end
 
 function Window:_buildMobileButton()
@@ -2184,7 +2384,8 @@ function Window:_relayout()
 		tab:_setCompact(compact)
 	end
 	if self._profile then
-		self._profile.row.Position = compact and UDim2.new(0.5, -15, 0, 11) or UDim2.fromOffset(6, 11)
+		self._profile.row.Position = compact and UDim2.new(0.5, -math.floor(D.avatar / 2), 0, D.profile - D.avatar - 1)
+			or UDim2.fromOffset(6, D.profile - D.avatar - 1)
 		for _, t in ipairs(self._profile.texts) do
 			t.Visible = not compact
 		end
@@ -2281,6 +2482,7 @@ function Window:SetVisible(v)
 	self:_closePopup()
 	self:_transition(v)
 	self:_showPill(not v)
+	self:_syncTopBar()
 	return self
 end
 
@@ -3855,11 +4057,11 @@ function Container:AddSlider(flag, options)
 	local el = self:_add(Slider, "Slider", flag, options, root)
 	el.Min, el.Max, el._step = min, max, step
 	el._suffix = tostring(options.Suffix or "")
-	el._label = label({ Size = UDim2.new(1, -80, 0, D.sliderTop - 4), Text = el.Text }, root)
+	el._label = label({ Size = UDim2.new(1, -80, 0, D.sliderTop), Text = el.Text }, root)
 	el._valueLabel = new("TextBox", {
 		AnchorPoint = Vector2.new(1, 0),
 		Position = UDim2.fromScale(1, 0),
-		Size = UDim2.fromOffset(80, D.sliderTop - 4),
+		Size = UDim2.fromOffset(80, D.sliderTop),
 		BackgroundTransparency = 1,
 		BorderSizePixel = 0,
 		Text = "",
@@ -3875,7 +4077,7 @@ function Container:AddSlider(flag, options)
 		local edit = button({
 			AnchorPoint = Vector2.new(1, 0),
 			Position = UDim2.fromScale(1, 0),
-			Size = UDim2.fromOffset(80, D.sliderTop - 2),
+			Size = UDim2.fromOffset(80, D.sliderTop),
 		}, root)
 		local function stopEdit(apply)
 			if not el._editing then
@@ -4025,10 +4227,10 @@ function Container:AddInput(flag, options)
 	local root = frame({ Size = UDim2.new(1, 0, 0, (hasText and D.inputLabel or 0) + boxH) }, self._body)
 	local el = self:_add(Input, "Input", flag, options, root)
 	if hasText then
-		el._label = label({ Size = UDim2.new(1, 0, 0, 16), Text = el.Text, TextSize = D.fLabel, TextColor3 = tok.tx2 }, root)
+		el._label = label({ Size = UDim2.new(1, 0, 0, D.inputLabel), Text = el.Text, TextSize = D.fLabel, TextColor3 = tok.tx2 }, root)
 	end
 	local box = frame({
-		Position = UDim2.fromOffset(0, hasText and 22 or 0),
+		Position = UDim2.fromOffset(0, hasText and D.inputLabel or 0),
 		Size = UDim2.new(1, 0, 0, boxH),
 		BackgroundColor3 = tok.el,
 	}, root)
@@ -4224,10 +4426,10 @@ function Container:AddSegmented(flag, options)
 	local el = self:_add(Segmented, "Segmented", flag, options, root)
 	el.Values = values
 	if hasText then
-		el._label = label({ Size = UDim2.new(1, 0, 0, 16), Text = el.Text, TextSize = D.fLabel, TextColor3 = tok.tx2 }, root)
+		el._label = label({ Size = UDim2.new(1, 0, 0, D.inputLabel), Text = el.Text, TextSize = D.fLabel, TextColor3 = tok.tx2 }, root)
 	end
 	local ctrl = frame({
-		Position = UDim2.fromOffset(0, hasText and 22 or 0),
+		Position = UDim2.fromOffset(0, hasText and D.inputLabel or 0),
 		Size = UDim2.new(1, 0, 0, ctrlH),
 		BackgroundColor3 = tok.el,
 	}, root)
@@ -4631,10 +4833,10 @@ function Container:AddDropdown(flag, options)
 	el._search = el._baseSearch .. " " .. table.concat(el.Values, " ")
 	el._placeholder = tostring(options.Placeholder or (el.Multi and "None" or "Select..."))
 	if hasText then
-		el._label = label({ Size = UDim2.new(1, 0, 0, 16), Text = el.Text, TextSize = D.fLabel, TextColor3 = tok.tx2 }, root)
+		el._label = label({ Size = UDim2.new(1, 0, 0, D.inputLabel), Text = el.Text, TextSize = D.fLabel, TextColor3 = tok.tx2 }, root)
 	end
 	local box = button({
-		Position = UDim2.fromOffset(0, hasText and 22 or 0),
+		Position = UDim2.fromOffset(0, hasText and D.inputLabel or 0),
 		Size = UDim2.new(1, 0, 0, boxH),
 		BackgroundColor3 = tok.el,
 		BackgroundTransparency = 0,
@@ -5895,12 +6097,17 @@ function Accent:_deserialize(v)
 	self:SetValue(v)
 end
 
-local function overlayTop()
-	return GuiService:GetGuiInset().Y + 10
-end
 
 function Library:_placeOverlays()
 	local y = overlayTop()
+	local win = Library._window
+	if win and win._bar then
+		local h = win._bar.Size.Y.Offset
+		win._bar.Position = UDim2.new(0.5, 0, 0, y)
+		if win._barMenu then
+			win._barMenu.Position = UDim2.new(0.5, 0, 0, y + h + 5)
+		end
+	end
 	if S.wm and not S.wmMoved then
 		S.wm.Position = UDim2.fromOffset(16, y)
 		if S.wm.Visible then
@@ -5980,6 +6187,10 @@ end
 function Library:SetArrayListVisible(on)
 	S.alOn = on == true
 	Library:_refreshArrayList()
+	local win = Library._window
+	if win then
+		win:_syncTopBar()
+	end
 	return self
 end
 
@@ -6096,6 +6307,14 @@ function Library:_renderArrayList()
 	Library:_placeOverlays()
 end
 
+function Library:IsWatermarkVisible()
+	return S.watermarkOn == true
+end
+
+function Library:IsKeybindListVisible()
+	return S.keybindListOn == true
+end
+
 function Library:SetWatermarkVisible(on)
 	on = on == true
 	S.watermarkOn = on
@@ -6189,6 +6408,10 @@ function Library:SetWatermarkVisible(on)
 		S.wmConn = nil
 	end
 	Library:_placeOverlays()
+	local win = Library._window
+	if win then
+		win:_syncTopBar()
+	end
 	return self
 end
 
@@ -6202,6 +6425,10 @@ end
 function Library:SetKeybindListVisible(on)
 	S.keybindListOn = on == true
 	Library:_refreshKeybinds()
+	local win = Library._window
+	if win then
+		win:_syncTopBar()
+	end
 	return self
 end
 
@@ -6998,7 +7225,7 @@ function Window:_buildConfigUI(box)
 	local nameRoot = frame({ Size = UDim2.new(1, 0, 0, D.inputLabel + boxH) }, box._body)
 	box:_add(Label, "ConfigName", nil, { Text = "Config name" }, nameRoot)
 	label({ Size = UDim2.new(1, 0, 0, 16), Text = "Config name", TextSize = D.fLabel, TextColor3 = tok.tx2 }, nameRoot)
-	local nameRow = frame({ Position = UDim2.fromOffset(0, 22), Size = UDim2.new(1, 0, 0, boxH) }, nameRoot)
+	local nameRow = frame({ Position = UDim2.fromOffset(0, D.inputLabel), Size = UDim2.new(1, 0, 0, boxH) }, nameRoot)
 	list(nameRow, true, 6)
 	local field = frame({ LayoutOrder = 1, Size = UDim2.new(0, 0, 1, 0), BackgroundColor3 = tok.el }, nameRow)
 	fill(field)
