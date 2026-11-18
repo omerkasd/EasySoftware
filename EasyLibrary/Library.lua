@@ -7720,6 +7720,8 @@ do
             end)
         end
 
+        local LayoutSubTabs
+
         function Tab:Resize()
             if TopBar.Visible == true then
                 local MaximumSize = math.floor(TabFrame.AbsoluteSize.Y / 3.25)
@@ -7757,6 +7759,10 @@ do
         
                 RightSide.Position = UDim2.new(0.5, 5, 0, 7)
                 RightSide.Size = UDim2.new(0.5, -10, 1, -14)
+            end
+
+            if LayoutSubTabs then
+                LayoutSubTabs()
             end
         end
 
@@ -7823,7 +7829,309 @@ end
             TabListLayout:ApplyLayout()
         end
 
+
+        --// Sub tabs: a row of sections across the top of the tab, each with its
+        --// own left and right column. Use these instead of groupboxes directly
+        --// on the tab; a tab uses one or the other, not both.
+        function Tab:AddSubTabs(Info)
+            Info = Library:Validate(Info or {}, { Height = 28, Padding = 2 })
+
+            local BarHeight = Info.Height
+            local Padding = Info.Padding
+
+            local SubTabs = {
+                Tabs = {};
+                Order = {};
+                ActiveTab = nil;
+                TableType = "SubTabs";
+            }
+
+            LeftSide.Visible = false
+            RightSide.Visible = false
+
+            local Bar = Library:Create("Frame", {
+                BackgroundTransparency = 1;
+                Position = UDim2.new(0, 7, 0, 7);
+                Size = UDim2.new(1, -14, 0, BarHeight);
+                ZIndex = 3;
+                Parent = TabFrame;
+            })
+
+            local Buttons = Library:Create("Frame", {
+                BackgroundTransparency = 1;
+                Position = UDim2.new(0, 0, 0, 0);
+                Size = UDim2.new(1, 0, 1, -1);
+                ZIndex = 3;
+                Parent = Bar;
+            })
+
+            Library:Create("UIListLayout", {
+                Padding = UDim.new(0, Padding);
+                FillDirection = Enum.FillDirection.Horizontal;
+                HorizontalAlignment = Enum.HorizontalAlignment.Left;
+                VerticalAlignment = Enum.VerticalAlignment.Center;
+                SortOrder = Enum.SortOrder.LayoutOrder;
+                Parent = Buttons;
+            })
+
+            local Separator = Library:Create("Frame", {
+                BackgroundColor3 = Library.OutlineColor;
+                BorderSizePixel = 0;
+                AnchorPoint = Vector2.new(0, 1);
+                Position = UDim2.new(0, 0, 1, 0);
+                Size = UDim2.new(1, 0, 0, 1);
+                ZIndex = 3;
+                Parent = Bar;
+            })
+
+            Library:AddToRegistry(Separator, { BackgroundColor3 = "OutlineColor"; })
+
+            local Indicator = Library:Create("Frame", {
+                BackgroundColor3 = Library.AccentColor;
+                BorderSizePixel = 0;
+                AnchorPoint = Vector2.new(0, 1);
+                Position = UDim2.new(0, 0, 1, 0);
+                Size = UDim2.new(0, 0, 0, 2);
+                ZIndex = 4;
+                Parent = Bar;
+            })
+
+            Library:AddToRegistry(Indicator, { BackgroundColor3 = "AccentColor"; })
+
+            local Pages = {}
+
+            function LayoutSubTabs()
+                local Top = LeftSide.Position.Y.Offset
+                local HeightOffset = LeftSide.Size.Y.Offset
+
+                Bar.Position = UDim2.new(0, 7, 0, Top)
+                Bar.Size = UDim2.new(1, -14, 0, BarHeight)
+
+                for _, Page in next, Pages do
+                    Page.Position = UDim2.new(0, 0, 0, Top + BarHeight + 6)
+                    Page.Size = UDim2.new(1, 0, 1, HeightOffset - BarHeight - 6)
+                end
+            end
+
+            local function MoveIndicator(Instant)
+                local Offset = 0
+
+                for _, Name in next, SubTabs.Order do
+                    local Entry = SubTabs.Tabs[Name]
+
+                    if Name == SubTabs.ActiveTab then
+                        local Position = UDim2.new(0, Offset, 1, 0)
+                        local Size = UDim2.new(0, Entry.Width, 0, 2)
+
+                        if Instant then
+                            Indicator.Position = Position
+                            Indicator.Size = Size
+                        else
+                            TweenService:Create(
+                                Indicator,
+                                TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                                { Position = Position, Size = Size }
+                            ):Play()
+                        end
+
+                        return
+                    end
+
+                    Offset = Offset + Entry.Width + Padding
+                end
+            end
+
+            local function MeasureAll()
+                for _, Name in next, SubTabs.Order do
+                    local Entry = SubTabs.Tabs[Name]
+                    Entry.Width = Library:GetTextBounds(Name, Library.Font, 14) + 24
+                    Entry.Button.Size = UDim2.new(0, Entry.Width, 1, 0)
+                end
+
+                MoveIndicator(true)
+            end
+
+            table.insert(Library.FontCallbacks, MeasureAll)
+
+            function SubTabs:AddSubTab(Name)
+                local SubTab = {
+                    Name = Name;
+                    TableType = "SubTab";
+                }
+
+                local Width = Library:GetTextBounds(Name, Library.Font, 14) + 24
+
+                local Button = Library:Create("Frame", {
+                    BackgroundTransparency = 1;
+                    Size = UDim2.new(0, Width, 1, 0);
+                    LayoutOrder = #SubTabs.Order + 1;
+                    ZIndex = 4;
+                    Parent = Buttons;
+                })
+
+                local ButtonLabel = Library:CreateLabel({
+                    BackgroundTransparency = 1;
+                    Size = UDim2.new(1, 0, 1, 0);
+                    TextSize = 14;
+                    Text = Name;
+                    TextXAlignment = Enum.TextXAlignment.Center;
+                    ZIndex = 5;
+                    Parent = Button;
+                })
+
+                local Region = Library:Create("TextButton", {
+                    BackgroundTransparency = 1;
+                    Size = UDim2.new(1, 0, 1, 0);
+                    Text = "";
+                    ZIndex = 6;
+                    Parent = Button;
+                })
+
+                --// Page: its own left and right column \\--
+                local Page = Library:Create("Frame", {
+                    BackgroundTransparency = 1;
+                    Visible = false;
+                    ZIndex = 2;
+                    Parent = TabFrame;
+                })
+
+                local function MakeSide(Position, Size)
+                    local Side = Library:Create("ScrollingFrame", {
+                        BackgroundTransparency = 1;
+                        BorderSizePixel = 0;
+                        Position = Position;
+                        Size = Size;
+                        CanvasSize = UDim2.new(0, 0, 0, 0);
+                        BottomImage = "";
+                        TopImage = "";
+                        ScrollBarThickness = 0;
+                        ZIndex = 2;
+                        Parent = Page;
+                    })
+
+                    local Layout = Library:Create("UIListLayout", {
+                        Padding = UDim.new(0, 8);
+                        FillDirection = Enum.FillDirection.Vertical;
+                        SortOrder = Enum.SortOrder.LayoutOrder;
+                        HorizontalAlignment = Enum.HorizontalAlignment.Center;
+                        Parent = Side;
+                    })
+
+                    Layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+                        Side.CanvasSize = UDim2.fromOffset(0, Layout.AbsoluteContentSize.Y)
+                    end)
+
+                    return Side
+                end
+
+                local PageLeft  = MakeSide(UDim2.new(0, 7, 0, 0),   UDim2.new(0.5, -10, 1, 0))
+                local PageRight = MakeSide(UDim2.new(0.5, 5, 0, 0), UDim2.new(0.5, -10, 1, 0))
+
+                Pages[Name] = Page
+
+                --// Colours \\--
+                local Hovering = false
+
+                local function RefreshLabel()
+                    local Key = (SubTabs.ActiveTab == Name or Hovering) and "AccentColor" or "FontColor"
+
+                    ButtonLabel.TextColor3 = Library[Key]
+
+                    if Library.RegistryMap[ButtonLabel] then
+                        Library.RegistryMap[ButtonLabel].Properties.TextColor3 = Key
+                    end
+                end
+
+                Button.MouseEnter:Connect(function() Hovering = true  RefreshLabel() end)
+                Button.MouseLeave:Connect(function() Hovering = false RefreshLabel() end)
+
+                function SubTab:Show()
+                    SubTabs.ActiveTab = Name
+
+                    for OtherName, Other in next, SubTabs.Tabs do
+                        if OtherName ~= Name then
+                            Other.Tab:Hide()
+                        end
+                    end
+
+                    Page.Visible = true
+                    RefreshLabel()
+                    MoveIndicator(false)
+                    LayoutSubTabs()
+                end
+
+                function SubTab:Hide()
+                    Page.Visible = false
+                    RefreshLabel()
+                end
+
+                function SubTab:GetSides()
+                    return { ["Left"] = PageLeft, ["Right"] = PageRight }
+                end
+
+                function SubTab:AddLeftGroupbox(BoxName, Options)
+                    Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+                    Options.ParentFrame = PageLeft
+                    return Tab:AddLeftGroupbox(BoxName, Options)
+                end
+
+                function SubTab:AddRightGroupbox(BoxName, Options)
+                    Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+                    Options.ParentFrame = PageRight
+                    return Tab:AddRightGroupbox(BoxName, Options)
+                end
+
+                function SubTab:AddLeftTabbox(BoxName, Options)
+                    Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+                    Options.ParentFrame = PageLeft
+                    return Tab:AddLeftTabbox(BoxName, Options)
+                end
+
+                function SubTab:AddRightTabbox(BoxName, Options)
+                    Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+                    Options.ParentFrame = PageRight
+                    return Tab:AddRightTabbox(BoxName, Options)
+                end
+
+                Region.MouseButton1Click:Connect(function()
+                    SubTab:Show()
+                end)
+
+                SubTabs.Tabs[Name] = { Tab = SubTab, Button = Button, Label = ButtonLabel, Width = Width, Page = Page }
+                table.insert(SubTabs.Order, Name)
+
+                RefreshLabel()
+
+                if #SubTabs.Order == 1 then
+                    SubTab:Show()
+                    MoveIndicator(true)
+                end
+
+                return SubTab
+            end
+
+            function SubTabs:SetTab(Name)
+                local Entry = SubTabs.Tabs[Name]
+                if Entry then Entry.Tab:Show() end
+            end
+
+            function SubTabs:GetActiveTab()
+                local Entry = SubTabs.Tabs[SubTabs.ActiveTab]
+                return Entry and Entry.Tab or nil
+            end
+
+            Tab.SubTabs = SubTabs
+            LayoutSubTabs()
+
+            return SubTabs
+        end
+
         function Tab:GetSides()
+            if Tab.SubTabs then
+                local Active = Tab.SubTabs:GetActiveTab()
+                if Active then return Active:GetSides() end
+            end
+
             return { ["Left"] = LeftSide, ["Right"] = RightSide }
         end
 
@@ -7854,7 +8162,7 @@ end
                 BorderMode = Enum.BorderMode.Inset;
                 Size = UDim2.new(1, 0, 0, 507 + 2);
                 ZIndex = 2;
-                Parent = Info.Side == 1 and LeftSide or RightSide;
+                Parent = Info.ParentFrame or (Info.Side == 1 and LeftSide or RightSide);
             })
 
             Library:AddToRegistry(BoxOuter, {
@@ -7999,12 +8307,12 @@ end
 
         function Tab:AddLeftGroupbox(Name, Options)
             Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
-            return Tab:AddGroupbox({ Side = 1; Name = Name; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
+            return Tab:AddGroupbox({ Side = 1; Name = Name; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; ParentFrame = Options.ParentFrame; })
         end
 
         function Tab:AddRightGroupbox(Name, Options)
             Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
-            return Tab:AddGroupbox({ Side = 2; Name = Name; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
+            return Tab:AddGroupbox({ Side = 2; Name = Name; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; ParentFrame = Options.ParentFrame; })
         end
 
         function Tab:AddTabbox(Info)
@@ -8027,7 +8335,7 @@ end
                 BorderMode = Enum.BorderMode.Inset;
                 Size = UDim2.new(1, 0, 0, 0);
                 ZIndex = 2;
-                Parent = Info.Side == 1 and LeftSide or RightSide;
+                Parent = Info.ParentFrame or (Info.Side == 1 and LeftSide or RightSide);
             })
 
             Library:AddToRegistry(BoxOuter, {
@@ -8344,12 +8652,12 @@ end
 
         function Tab:AddLeftTabbox(Name, Options)
             Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
-            return Tab:AddTabbox({ Name = Name, Side = 1; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
+            return Tab:AddTabbox({ Name = Name, Side = 1; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; ParentFrame = Options.ParentFrame; })
         end
 
         function Tab:AddRightTabbox(Name, Options)
             Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
-            return Tab:AddTabbox({ Name = Name, Side = 2; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
+            return Tab:AddTabbox({ Name = Name, Side = 2; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; ParentFrame = Options.ParentFrame; })
         end
 
         TabButton.InputBegan:Connect(function(Input)
