@@ -253,6 +253,8 @@ local Library = {
     CornerRadius = 5;
     Corners = {};
     AnimationSpeed = 0.12;
+    BlurEnabled = true;
+    BlurSize = 12;
 
     -- frames --
     OpenedFrames = {};
@@ -641,6 +643,41 @@ function Library:Animate(Instance, Properties, Multiplier)
             Instance[Property] = Value
         end
     end
+end
+
+-- Background blur while the menu is open.
+local Lighting = cloneref(game:GetService("Lighting"))
+local BlurEffect
+
+function Library:SetBlur(Enabled)
+    if Library.Unloaded then return end
+
+    if not Library.BlurEnabled then
+        Enabled = false
+    end
+
+    if not BlurEffect then
+        if not Enabled then return end
+
+        local Ok = pcall(function()
+            BlurEffect = Instance.new("BlurEffect")
+            BlurEffect.Name = "EasyLibraryBlur"
+            BlurEffect.Size = 0
+            BlurEffect.Parent = Lighting
+        end)
+
+        if not Ok then
+            BlurEffect = nil
+            return
+        end
+    end
+
+    Library:Animate(BlurEffect, { Size = Enabled and Library.BlurSize or 0 }, 2)
+end
+
+function Library:SetBlurEnabled(Enabled)
+    Library.BlurEnabled = Enabled and true or false
+    Library:SetBlur(Library.BlurEnabled and Library.Toggled)
 end
 
 function Library:SetAnimationSpeed(Value)
@@ -1246,6 +1283,11 @@ function Library:Unload()
     table.clear(Library.DragBlockers)
     table.clear(Library.FontCallbacks)
     table.clear(Library.Corners)
+
+    if BlurEffect then
+        BlurEffect:Destroy()
+        BlurEffect = nil
+    end
     Library.SearchBox = nil
 
     Library.Unloaded = true
@@ -1285,7 +1327,8 @@ local Templates = { -- TO-DO: do it for missing elements.
         Center = false,
         Resizable = false,
         Searchable = true,
-        QuickBar = true
+        QuickBar = true,
+        Blur = true
     },
 
     --// Elements \\--
@@ -6507,12 +6550,16 @@ do
         Library.Watermark.Visible = Bool
     end
 
-    function Library:SetWatermark(Text)
+    -- updates the text without touching visibility
+    local function UpdateWatermarkText(Text)
         local X, Y = Library:GetTextBounds(Text, Library.Font, 14)
         Library.Watermark.Size = UDim2.new(0, X + 15, 0, (Y * 1.5) + 3)
-        Library:SetWatermarkVisibility(true)
-
         Library.WatermarkText.Text = Text
+    end
+
+    function Library:SetWatermark(Text)
+        UpdateWatermarkText(Text)
+        Library:SetWatermarkVisibility(true)
     end
 
     --// Auto updating watermark \\--
@@ -6573,7 +6620,8 @@ do
             if Now - LastUpdate < Info.Interval then return end
             LastUpdate = Now
 
-            Library:SetWatermark(Build())
+            -- text only: whether the watermark is shown is the user's call
+            UpdateWatermarkText(Build())
         end)
 
         Library:GiveSignal(WatermarkConnection)
@@ -9176,9 +9224,14 @@ end
 
         Library.Toggled = Toggled
 
-        if Library.RefreshQuickBar then
+        Library:SetBlur(Toggled)
+
+        if WindowInfo.QuickBar then
+            Library:SetQuickBarVisibility(Toggled)
+        elseif Library.RefreshQuickBar then
             Library.RefreshQuickBar()
         end
+
         if WindowInfo.UnlockMouseWhileOpen then
             ModalElement.Modal = Library.Toggled
         end
@@ -9460,11 +9513,9 @@ end
         end)
     end
 
-    Window:SetBackgroundImage(WindowInfo.BackgroundImage or "")
+    Library.BlurEnabled = WindowInfo.Blur and true or false
 
-    if WindowInfo.QuickBar then
-        Library:SetQuickBarVisibility(true)
-    end
+    Window:SetBackgroundImage(WindowInfo.BackgroundImage or "")
 
     if WindowInfo.AutoShow then task.spawn(Library.Toggle) end
 
