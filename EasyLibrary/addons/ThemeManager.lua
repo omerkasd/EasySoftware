@@ -167,7 +167,21 @@ local ThemeManager = {} do
 		if not played then
 			videoInstance.Visible = false
 			if not quiet then VideoWarn("Roblox refused to play the file") end
+			return
 		end
+
+		-- Roblox loads the asset asynchronously, so a codec it dislikes only shows up
+		-- a moment later as a "Failed to load rbxasset://..." line in the console.
+		task.delay(2, function()
+			local ok, loaded = pcall(function() return videoInstance.Loaded end)
+
+			if ok and loaded == false then
+				videoInstance.Visible = false
+				if not quiet then
+					VideoWarn("Roblox could not decode the file, try a VP8 or VP9 .webm with no audio track")
+				end
+			end
+		end)
 	end
 
 	function ThemeManager:SetLibrary(library)
