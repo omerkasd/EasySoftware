@@ -6425,6 +6425,8 @@ do
         Parent = WatermarkInner;
     })
 
+    Library:RegisterCorner(InnerFrame, 0.8)
+
     local Gradient = Library:Create("UIGradient", {
         Color = ColorSequence.new({
             ColorSequenceKeypoint.new(0, Library:GetDarkerColor(Library.MainColor)),
@@ -6466,6 +6468,79 @@ do
         Library:SetWatermarkVisibility(true)
 
         Library.WatermarkText.Text = Text
+    end
+
+    --// Auto updating watermark \\--
+    local WatermarkConnection
+    local FrameCounter, FrameTimer, FPS = 0, tick(), 60
+
+    local function GetPing()
+        local Ok, Value = pcall(function()
+            local Stats = cloneref(game:GetService("Stats"))
+            return math.floor(Stats.Network.ServerStatsItem["Data Ping"]:GetValue())
+        end)
+
+        return Ok and Value or 0
+    end
+
+    -- Text accepts {title} {fps} {ping} {time} {date} {user} {displayname} {place}
+    function Library:EnableWatermark(Info)
+        Info = Library:Validate(Info or {}, {
+            Text = "{title} | {fps} fps | {ping} ms | {time}",
+            Title = "Watermark",
+            Interval = 1,
+        })
+
+        Library:DisableWatermark()
+
+        FrameTimer, FrameCounter = tick(), 0
+        local LastUpdate = 0
+
+        local function Build()
+            local Text = Info.Text
+
+            Text = Text:gsub("{title}", Info.Title)
+            Text = Text:gsub("{fps}", tostring(FPS))
+            Text = Text:gsub("{ping}", tostring(GetPing()))
+            Text = Text:gsub("{time}", os.date("%H:%M:%S"))
+            Text = Text:gsub("{date}", os.date("%d/%m/%Y"))
+            Text = Text:gsub("{user}", LocalPlayer and LocalPlayer.Name or "")
+            Text = Text:gsub("{displayname}", LocalPlayer and LocalPlayer.DisplayName or "")
+            Text = Text:gsub("{place}", tostring(game.PlaceId))
+
+            return Text
+        end
+
+        Library:SetWatermark(Build())
+
+        WatermarkConnection = RunService.RenderStepped:Connect(function()
+            if Library.Unloaded then return end
+
+            FrameCounter = FrameCounter + 1
+            local Now = tick()
+
+            if Now - FrameTimer >= 1 then
+                FPS = FrameCounter
+                FrameTimer = Now
+                FrameCounter = 0
+            end
+
+            if Now - LastUpdate < Info.Interval then return end
+            LastUpdate = Now
+
+            Library:SetWatermark(Build())
+        end)
+
+        Library:GiveSignal(WatermarkConnection)
+    end
+
+    function Library:DisableWatermark()
+        if WatermarkConnection then
+            WatermarkConnection:Disconnect()
+            WatermarkConnection = nil
+        end
+
+        Library:SetWatermarkVisibility(false)
     end
 end
 
@@ -6579,6 +6654,8 @@ do
             ZIndex = 11002;
             Parent = NotifyInner;
         })
+
+        Library:RegisterCorner(InnerFrame, 0.8)
 
         local Gradient = Library:Create("UIGradient", {
             Color = ColorSequence.new({
@@ -9065,6 +9142,8 @@ end
             ZIndex = 202;
             Parent = ToggleUIInner;
         })
+
+        Library:RegisterCorner(ToggleUIInnerFrame, 0.6)
     
         local ToggleUIGradient = Library:Create("UIGradient", {
             Color = ColorSequence.new({
@@ -9140,6 +9219,8 @@ end
             ZIndex = 202;
             Parent = LockUIInner;
         })
+
+        Library:RegisterCorner(LockUIInnerFrame, 0.6)
     
         local LockUIGradient = Library:Create("UIGradient", {
             Color = ColorSequence.new({
