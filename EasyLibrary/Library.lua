@@ -255,6 +255,13 @@ local Library = {
     AnimationSpeed = 0.12;
     BlurEnabled = true;
     BlurSize = 12;
+    Folder = "EasyLibrary";
+    RememberLayout = true;
+    Favorites = {};
+    FavoritesOnly = false;
+    Layouts = {};
+    MovableGroupboxes = true;
+    WarnKeybindConflicts = true;
 
     -- frames --
     OpenedFrames = {};
@@ -645,7 +652,259 @@ function Library:Animate(Instance, Properties, Multiplier)
     end
 end
 
--- Background blur while the menu is open.
+--// Favourites \\--
+local FavoritesLoaded = false
+
+function Library:LoadFavorites()
+    if FavoritesLoaded then return end
+    FavoritesLoaded = true
+
+    if not (isfile and readfile) then return end
+
+    local Path = Library.Folder .. "/window.json"
+    if not isfile(Path) then return end
+
+    local Ok, Data = pcall(function()
+        return cloneref(game:GetService("HttpService")):JSONDecode(readfile(Path))
+    end)
+
+    if Ok and typeof(Data) == "table" then
+        if typeof(Data.Favorites) == "table" then
+            Library.Favorites = Data.Favorites
+        end
+
+        if typeof(Data.Layouts) == "table" then
+            Library.Layouts = Data.Layouts
+        end
+    end
+end
+
+function Library:FavoriteKey(Element)
+    if typeof(Element) ~= "table" then return nil end
+    return Element.Index or Element.Text
+end
+
+function Library:IsFavorite(Element)
+    local Key = Library:FavoriteKey(Element)
+    return Key ~= nil and Library.Favorites[Key] == true
+end
+
+-- Gives an element a right-click favourite toggle and the accent marker that
+-- shows in the groupbox gutter next to it.
+function Library:MakeFavoritable(Element)
+    local Holder = Element and Element.Holder
+    if not Holder then return end
+
+    Library:LoadFavorites()
+
+    local Marker = Library:Create("Frame", {
+        BackgroundColor3 = Library.AccentColor;
+        BorderSizePixel = 0;
+        Position = UDim2.new(0, -3, 0, 1);
+        Size = UDim2.new(0, 2, 1, -2);
+        Visible = false;
+        ZIndex = 20;
+        Parent = Holder;
+    })
+
+    Library:AddToRegistry(Marker, { BackgroundColor3 = "AccentColor"; })
+    Library:RegisterCorner(Marker, 0.2)
+
+    Element.FavoriteMarker = Marker
+
+    function Element:SetFavorite(State, SkipSave)
+        Element.Favorite = State and true or false
+        Marker.Visible = Element.Favorite
+
+        local Key = Library:FavoriteKey(Element)
+
+        if Key ~= nil then
+            Library.Favorites[Key] = Element.Favorite or nil
+        end
+
+        if Library.ReapplySearch then
+            Library.ReapplySearch()
+        end
+
+        if not SkipSave then
+            Library:SaveWindowLayout()
+        end
+    end
+
+    function Element:ToggleFavorite()
+        Element:SetFavorite(not Element.Favorite)
+    end
+
+    Holder.InputBegan:Connect(function(Input)
+        if Input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
+        if Library:MouseIsOverOpenedFrame() then return end
+
+        Element:ToggleFavorite()
+    end)
+
+    if Library:IsFavorite(Element) then
+        Element:SetFavorite(true, true)
+    end
+end
+
+function Library:SetFavoritesOnly(State)
+    Library.FavoritesOnly = State and true or false
+
+    if Library.ReapplySearch then
+        Library.ReapplySearch()
+    end
+end
+
+--// Moving groupboxes between the two columns \\--
+
+-- Both columns of a tab (or of a sub tab) live under the same parent, so the
+-- sibling column can always be found from the one a box is already in.
+local function GetSidePair(Frame)
+    local Parent = Frame and Frame.Parent
+    if not Parent then return nil, nil end
+
+    local Sides = {}
+
+    for _, Child in next, Parent:GetChildren() do
+        if Child:IsA("ScrollingFrame") then
+            table.insert(Sides, Child)
+        end
+    end
+
+    if #Sides < 2 then return Frame, nil end
+
+    table.sort(Sides, function(A, B)
+        if A.Position.X.Scale ~= B.Position.X.Scale then
+            return A.Position.X.Scale < B.Position.X.Scale
+        end
+
+        return A.Position.X.Offset < B.Position.X.Offset
+    end)
+
+    return Sides[1], Sides[2]
+end
+
+local function BoxesIn(Side)
+    local Boxes = {}
+
+    for _, Child in next, Side:GetChildren() do
+        if Child:IsA("Frame") then
+            table.insert(Boxes, Child)
+        end
+    end
+
+    table.sort(Boxes, function(A, B)
+        return A.LayoutOrder < B.LayoutOrder
+    end)
+
+    return Boxes
+end
+
+local function Renumber(Side)
+    for Order, Box in ipairs(BoxesIn(Side)) do
+        Box.LayoutOrder = Order
+    end
+end
+
+-- Where in a column the box would land, given the pointer's Y position.
+local function DropIndex(Side, Dragged, MouseY)
+    local Index = 1
+
+    for _, Box in ipairs(BoxesIn(Side)) do
+        if Box ~= Dragged then
+            if MouseY > Box.AbsolutePosition.Y + (Box.AbsoluteSize.Y / 2) then
+                Index = Index + 1
+            end
+        end
+    end
+
+    return Index
+end
+
+function Library:SaveGroupboxLayout(Key, Side, Order)
+    if not Key then return end
+
+    Library.Layouts[Key] = { Side = Side, Order = Order }
+    Library:SaveWindowLayout()
+end
+
+--// Window layout \\--
+local HttpService = cloneref(game:GetService("HttpService"))
+
+function Library:SetFolder(Folder)
+    Library.Folder = tostring(Folder)
+
+    if isfolder and makefolder and not isfolder(Library.Folder) then
+        pcall(makefolder, Library.Folder)
+    end
+end
+
+local function LayoutPath()
+    return Library.Folder .. "/window.json"
+end
+
+function Library:SaveWindowLayout()
+    local Frame = Library.WindowFrame
+    if not Frame or not (writefile and isfolder and makefolder) then return end
+
+    if not isfolder(Library.Folder) then
+        local Made = pcall(makefolder, Library.Folder)
+        if not Made then return end
+    end
+
+    local Data = {
+        PosX = Frame.Position.X.Offset,
+        PosY = Frame.Position.Y.Offset,
+        PosXScale = Frame.Position.X.Scale,
+        PosYScale = Frame.Position.Y.Scale,
+        SizeX = Frame.Size.X.Offset,
+        SizeY = Frame.Size.Y.Offset,
+        Favorites = Library.Favorites,
+        Layouts = Library.Layouts,
+    }
+
+    pcall(function()
+        writefile(LayoutPath(), HttpService:JSONEncode(Data))
+    end)
+end
+
+function Library:LoadWindowLayout()
+    local Frame = Library.WindowFrame
+    if not Frame or not (isfile and readfile) then return false end
+    if not isfile(LayoutPath()) then return false end
+
+    local Ok, Data = pcall(function()
+        return HttpService:JSONDecode(readfile(LayoutPath()))
+    end)
+
+    if not Ok or typeof(Data) ~= "table" then return false end
+
+    if typeof(Data.Favorites) == "table" then
+        Library.Favorites = Data.Favorites
+    end
+    if not (tonumber(Data.SizeX) and tonumber(Data.SizeY)) then return false end
+
+    -- keep it on screen and no smaller than the library allows
+    local Viewport = Library.ScreenGui.AbsoluteSize
+    local SizeX = math.clamp(Data.SizeX, Library.MinSize.X, math.max(Viewport.X, Library.MinSize.X))
+    local SizeY = math.clamp(Data.SizeY, Library.MinSize.Y, math.max(Viewport.Y, Library.MinSize.Y))
+
+    Frame.Size = UDim2.new(0, SizeX, 0, SizeY)
+    Frame.Position = UDim2.new(
+        tonumber(Data.PosXScale) or 0, math.clamp(Data.PosX or 0, -SizeX + 40, math.max(Viewport.X - 40, 0)),
+        tonumber(Data.PosYScale) or 0, math.clamp(Data.PosY or 0, 0, math.max(Viewport.Y - 40, 0))
+    )
+
+    return true
+end
+
+function Library:ForgetWindowLayout()
+    if delfile and isfile and isfile(LayoutPath()) then
+        pcall(delfile, LayoutPath())
+    end
+end
+
+--// Background blur while the menu is open.
 local Lighting = cloneref(game:GetService("Lighting"))
 local BlurEffect
 
@@ -678,6 +937,54 @@ end
 function Library:SetBlurEnabled(Enabled)
     Library.BlurEnabled = Enabled and true or false
     Library:SetBlur(Library.BlurEnabled and Library.Toggled)
+end
+
+--// Keybind conflicts \\--
+local function SameModifiers(A, B)
+    A, B = A or {}, B or {}
+    if #A ~= #B then return false end
+
+    for _, Value in next, A do
+        if not table.find(B, Value) then return false end
+    end
+
+    return true
+end
+
+-- Returns the indexes of every other key picker bound to the same key.
+function Library:GetKeybindConflicts(Picker)
+    local Conflicts = {}
+
+    if not Picker or typeof(Picker.Value) ~= "string" then return Conflicts end
+    if Picker.Value == "None" or Picker.Value == "Unknown" then return Conflicts end
+
+    for Index, Option in next, Library.Options do
+        if Option == Picker then continue end
+        if typeof(Option) ~= "table" or Option.Type ~= "KeyPicker" then continue end
+        if Option.Value ~= Picker.Value then continue end
+        if not SameModifiers(Option.Modifiers, Picker.Modifiers) then continue end
+
+        table.insert(Conflicts, Option.Text or Index)
+    end
+
+    return Conflicts
+end
+
+function Library:WarnKeybindConflict(Picker)
+    if not Library.WarnKeybindConflicts then return end
+
+    local Conflicts = Library:GetKeybindConflicts(Picker)
+    if #Conflicts == 0 then return end
+
+    Library:Notify({
+        Title = "Keybind conflict",
+        Description = string.format(
+            "%s is already bound to %s",
+            tostring(Picker.DisplayValue or Picker.Value),
+            table.concat(Conflicts, ", ")
+        ),
+        Time = 6,
+    })
 end
 
 function Library:SetAnimationSpeed(Value)
@@ -1328,7 +1635,8 @@ local Templates = { -- TO-DO: do it for missing elements.
         Resizable = false,
         Searchable = true,
         QuickBar = true,
-        Blur = true
+        Blur = true,
+        RememberLayout = true
     },
 
     --// Elements \\--
@@ -2052,6 +2360,10 @@ do
 
                 KeyPicker.Toggled = false
                 KeyPicker:SetValue({ Key, KeyPicker.Mode, ActiveModifiers })
+
+                -- only warn when the user picked the key themselves, not on
+                -- defaults or when a config is loaded
+                Library:WarnKeybindConflict(KeyPicker)
 
                 -- RunService.RenderStepped:Wait()
                 repeat task.wait() until not IsInputDown(Input) or InputService:GetFocusedTextBox()
@@ -3286,6 +3598,9 @@ do
             Dropdown:BuildDropdownList()
         end
 
+        Dropdown.Holder = DropdownOuter
+        Library:MakeFavoritable(Dropdown)
+
         function Dropdown:SetVisible(Visibility)
             Dropdown.Visible = Visibility
 
@@ -3481,6 +3796,7 @@ do
         Dropdown.Default = Defaults
         Dropdown.DefaultValues = Dropdown.Values
 
+        Dropdown.Index = Idx
         Options[Idx] = Dropdown
 
         return self
@@ -3945,6 +4261,9 @@ do
             Button.TooltipTable.Disabled = Button.Disabled
         end
 
+        Button.Holder = Button.Outer
+        Library:MakeFavoritable(Button)
+
         function Button:SetVisible(Visibility)
             IsVisible = Visibility
 
@@ -4149,6 +4468,9 @@ do
             end
         end
 
+        Textbox.Holder = TextBoxOuter
+        Library:MakeFavoritable(Textbox)
+
         function Textbox:SetVisible(Visibility)
             Textbox.Visible = Visibility
 
@@ -4228,6 +4550,7 @@ do
         Textbox.Default = Textbox.Value
 
         table.insert(Groupbox.Elements, Textbox)
+        Textbox.Index = Idx
         Options[Idx] = Textbox
 
         return Textbox
@@ -4411,6 +4734,9 @@ do
             Library:UpdateDependencyGroupboxes()
         end
 
+        Toggle.Holder = ToggleOuter
+        Library:MakeFavoritable(Toggle)
+
         function Toggle:SetVisible(Visibility)
             Toggle.Visible = Visibility
 
@@ -4470,6 +4796,7 @@ do
         Toggle.Default = Toggle.Value
 
         table.insert(Groupbox.Elements, Toggle)
+        Toggle.Index = Idx
         Toggles[Idx] = Toggle
 
         Library:UpdateDependencyBoxes()
@@ -4720,6 +5047,9 @@ do
             end
         end
 
+        Slider.Holder = SliderOuter
+        Library:MakeFavoritable(Slider)
+
         function Slider:SetVisible(Visibility)
             Slider.Visible = Visibility
 
@@ -4836,6 +5166,7 @@ do
         Slider.Default = Slider.Value
 
         table.insert(Groupbox.Elements, Slider)
+        Slider.Index = Idx
         Options[Idx] = Slider
 
         return Slider
@@ -5323,6 +5654,9 @@ do
             Dropdown:BuildDropdownList()
         end
 
+        Dropdown.Holder = DropdownOuter
+        Library:MakeFavoritable(Dropdown)
+
         function Dropdown:SetVisible(Visibility)
             Dropdown.Visible = Visibility
 
@@ -5520,6 +5854,7 @@ do
         Dropdown.DefaultValues = Dropdown.Values
 
         table.insert(Groupbox.Elements, Dropdown)
+        Dropdown.Index = Idx
         Options[Idx] = Dropdown
 
         return Dropdown
@@ -7110,6 +7445,7 @@ function Library:CreateWindow(...)
         Name = "Window";
     })
     LibraryMainOuterFrame = Outer
+    Library.WindowFrame = Outer
     Library:MakeDraggable(Outer, 25, true)
     if WindowInfo.Resizable then Library:MakeResizable(Outer, Library.MinSize) end
 
@@ -7174,11 +7510,12 @@ function Library:CreateWindow(...)
     -- returns true if at least one element in the box is showing
     local function FilterBox(Box, Query, Searching)
         local AnyVisible = false
+        local Filtering = Searching or Library.FavoritesOnly
 
         for _, Element in next, Box.Elements do
             if typeof(Element) ~= "table" then continue end
 
-            if not Searching then
+            if not Filtering then
                 if Element.SearchWasVisible ~= nil then
                     SetElementVisible(Element, Element.SearchWasVisible)
                     Element.SearchWasVisible = nil
@@ -7190,11 +7527,19 @@ function Library:CreateWindow(...)
                 Element.SearchWasVisible = GetElementVisible(Element)
             end
 
-            local Text = GetElementText(Element)
-            local Match = Element.SearchWasVisible and typeof(Text) == "string"
-                and string.find(string.lower(Text), Query, 1, true) ~= nil
+            local Match = Element.SearchWasVisible and true or false
 
-            SetElementVisible(Element, Match and true or false)
+            if Match and Library.FavoritesOnly and not Element.Favorite then
+                Match = false
+            end
+
+            if Match and Searching then
+                local Text = GetElementText(Element)
+                Match = typeof(Text) == "string"
+                    and string.find(string.lower(Text), Query, 1, true) ~= nil
+            end
+
+            SetElementVisible(Element, Match)
             if Match then AnyVisible = true end
         end
 
@@ -7226,16 +7571,18 @@ function Library:CreateWindow(...)
 
     function Window:ApplySearch(Query)
         Query = string.lower(tostring(Query or ""))
+
         local Searching = Query ~= ""
+        local Filtering = Searching or Library.FavoritesOnly
 
         for _, Tab in next, Window.Tabs do
             for _, Groupbox in next, Tab.Groupboxes do
                 local AnyVisible = FilterBox(Groupbox, Query, Searching)
 
-                SyncCollapse(Groupbox, Searching, AnyVisible)
+                SyncCollapse(Groupbox, Filtering, AnyVisible)
 
                 if Groupbox.BoxOuter then
-                    Groupbox.BoxOuter.Visible = (not Searching) or AnyVisible
+                    Groupbox.BoxOuter.Visible = (not Filtering) or AnyVisible
                 end
             end
 
@@ -7248,18 +7595,22 @@ function Library:CreateWindow(...)
                     end
                 end
 
-                SyncCollapse(Tabbox, Searching, AnyVisible)
+                SyncCollapse(Tabbox, Filtering, AnyVisible)
 
                 if Tabbox.BoxOuter then
-                    Tabbox.BoxOuter.Visible = (not Searching) or AnyVisible
+                    Tabbox.BoxOuter.Visible = (not Filtering) or AnyVisible
                 end
             end
         end
 
-        if not Searching then
+        if not Filtering then
             Library:UpdateDependencyBoxes()
             Library:UpdateDependencyGroupboxes()
         end
+    end
+
+    Library.ReapplySearch = function()
+        Window:ApplySearch(SearchBox and SearchBox.Text or "")
     end
 
     function Window:ClearSearch()
@@ -7272,7 +7623,7 @@ function Library:CreateWindow(...)
             AnchorPoint = Vector2.new(1, 0.5);
             BackgroundColor3 = Color3.new(0, 0, 0);
             BorderColor3 = Color3.new(0, 0, 0);
-            Position = UDim2.new(1, -8, 0, 13);
+            Position = UDim2.new(1, -30, 0, 13);
             Size = UDim2.new(0, 150, 0, 16);
             ZIndex = 2;
             Parent = Inner;
@@ -7331,6 +7682,61 @@ function Library:CreateWindow(...)
 
         Library.SearchBox = SearchBox
         table.insert(Library.DragBlockers, SearchOuter)
+
+        --// Favourites filter \\--
+        local FavButton = Library:Create("Frame", {
+            AnchorPoint = Vector2.new(1, 0.5);
+            BackgroundTransparency = 1;
+            Position = UDim2.new(1, -8, 0, 13);
+            Size = UDim2.new(0, 18, 0, 18);
+            ZIndex = 2;
+            Parent = Inner;
+        })
+
+        local FavLabel = Library:CreateLabel({
+            BackgroundTransparency = 1;
+            Size = UDim2.new(1, 0, 1, 0);
+            TextSize = 16;
+            Text = "*";
+            TextXAlignment = Enum.TextXAlignment.Center;
+            ZIndex = 3;
+            Parent = FavButton;
+        })
+
+        local FavRegion = Library:Create("TextButton", {
+            BackgroundTransparency = 1;
+            Size = UDim2.new(1, 0, 1, 0);
+            Text = "";
+            ZIndex = 4;
+            Parent = FavButton;
+        })
+
+        local FavHovering = false
+
+        local function RefreshFavButton()
+            local Key = (Library.FavoritesOnly or FavHovering) and "AccentColor" or "FontColor"
+
+            Library:Animate(FavLabel, { TextColor3 = Library[Key] })
+
+            if Library.RegistryMap[FavLabel] then
+                Library.RegistryMap[FavLabel].Properties.TextColor3 = Key
+            end
+        end
+
+        FavButton.MouseEnter:Connect(function() FavHovering = true  RefreshFavButton() end)
+        FavButton.MouseLeave:Connect(function() FavHovering = false RefreshFavButton() end)
+
+        FavRegion.MouseButton1Click:Connect(function()
+            Library:SetFavoritesOnly(not Library.FavoritesOnly)
+            RefreshFavButton()
+
+            if Library.FavoritesOnly and next(Library.Favorites) == nil then
+                Library:Notify("Nothing is marked yet. Right-click an option to favourite it.", 6)
+            end
+        end)
+
+        RefreshFavButton()
+        table.insert(Library.DragBlockers, FavButton)
     end
 
     local MainSectionOuter = Library:Create("Frame", {
@@ -8732,7 +9138,7 @@ end
                 Parent = BoxInner;
             })
 
-            local CollapseArrow, CollapseButton
+            local CollapseArrow
 
             if Groupbox.Collapsible then
                 CollapseArrow = Library:CreateLabel({
@@ -8744,16 +9150,17 @@ end
                     ZIndex = 6;
                     Parent = BoxInner;
                 })
-
-                CollapseButton = Library:Create("TextButton", {
-                    BackgroundTransparency = 1;
-                    Position = UDim2.new(0, 0, 0, 2);
-                    Size = UDim2.new(1, 0, 0, 18);
-                    Text = "";
-                    ZIndex = 7;
-                    Parent = BoxInner;
-                })
             end
+
+            -- click collapses, dragging moves the box between the columns
+            local HeaderButton = Library:Create("TextButton", {
+                BackgroundTransparency = 1;
+                Position = UDim2.new(0, 0, 0, 2);
+                Size = UDim2.new(1, 0, 0, 18);
+                Text = "";
+                ZIndex = 7;
+                Parent = BoxInner;
+            })
 
             local Container = Library:Create("Frame", {
                 BackgroundTransparency = 1;
@@ -8800,15 +9207,169 @@ end
                 Groupbox:SetCollapsed(not Groupbox.Collapsed)
             end
 
-            if CollapseButton then
-                CollapseButton.MouseButton1Click:Connect(function()
-                    Groupbox:ToggleCollapsed()
+            Library:OnHighlight(HeaderButton, GroupboxLabel,
+                { TextColor3 = "AccentColor" },
+                { TextColor3 = "FontColor" }
+            )
+
+            --// Click to collapse, drag to move \\--
+            local LayoutKey = tostring(Tab.Name) .. "::" .. tostring(Info.Name)
+
+            do
+                local StartSide = BoxOuter.Parent
+                BoxOuter.LayoutOrder = #BoxesIn(StartSide)
+
+                local Saved = Library.Layouts[LayoutKey]
+
+                if Saved then
+                    local Left, Right = GetSidePair(StartSide)
+                    local Target = (Saved.Side == "Right") and Right or Left
+
+                    if Target then
+                        BoxOuter.Parent = Target
+                        BoxOuter.LayoutOrder = tonumber(Saved.Order) or BoxOuter.LayoutOrder
+                    end
+                end
+
+                local Dragging, Moved = false, false
+                local StartX, StartY = 0, 0
+                local Indicator
+
+                local function ClearIndicator()
+                    if Indicator then
+                        Indicator:Destroy()
+                        Indicator = nil
+                    end
+                end
+
+                local function TargetSide()
+                    local Left, Right = GetSidePair(BoxOuter.Parent)
+
+                    if Right and Library:MouseIsOverFrame(Right) then return Right end
+                    if Left and Library:MouseIsOverFrame(Left) then return Left end
+
+                    return nil
+                end
+
+                local function ShowIndicator(Side, Index)
+                    ClearIndicator()
+
+                    local Host = Side.Parent
+                    if not Host then return end
+
+                    local Boxes = {}
+
+                    for _, Box in ipairs(BoxesIn(Side)) do
+                        if Box ~= BoxOuter then table.insert(Boxes, Box) end
+                    end
+
+                    local Y
+
+                    if Boxes[Index] then
+                        Y = Boxes[Index].AbsolutePosition.Y - 4
+                    elseif #Boxes > 0 then
+                        local Last = Boxes[#Boxes]
+                        Y = Last.AbsolutePosition.Y + Last.AbsoluteSize.Y + 2
+                    else
+                        Y = Side.AbsolutePosition.Y + 2
+                    end
+
+                    Indicator = Library:Create("Frame", {
+                        BackgroundColor3 = Library.AccentColor;
+                        BorderSizePixel = 0;
+                        Position = UDim2.new(
+                            0, Side.AbsolutePosition.X - Host.AbsolutePosition.X,
+                            0, Y - Host.AbsolutePosition.Y
+                        );
+                        Size = UDim2.new(0, Side.AbsoluteSize.X, 0, 2);
+                        ZIndex = 50;
+                        Parent = Host;
+                    })
+                end
+
+                local function IsClickInput(Input)
+                    return Input.UserInputType == Enum.UserInputType.MouseButton1
+                        or Input.UserInputType == Enum.UserInputType.Touch
+                end
+
+                HeaderButton.InputBegan:Connect(function(Input)
+                    if not IsClickInput(Input) then return end
+                    if Library:MouseIsOverOpenedFrame() then return end
+
+                    Dragging = true
+                    Moved = false
+                    StartX, StartY = Mouse.X, Mouse.Y
                 end)
 
-                Library:OnHighlight(CollapseButton, GroupboxLabel,
-                    { TextColor3 = "AccentColor" },
-                    { TextColor3 = "FontColor" }
-                )
+                Library:GiveSignal(InputService.InputChanged:Connect(function(Input)
+                    if not Dragging then return end
+                    if Input.UserInputType ~= Enum.UserInputType.MouseMovement
+                        and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+                    if not Moved then
+                        if math.abs(Mouse.X - StartX) < 6 and math.abs(Mouse.Y - StartY) < 6 then
+                            return
+                        end
+
+                        if not Library.MovableGroupboxes or Library.CantDragForced then
+                            Dragging = false
+                            return
+                        end
+
+                        Moved = true
+                    end
+
+                    local Side = TargetSide()
+
+                    if Side then
+                        ShowIndicator(Side, DropIndex(Side, BoxOuter, Mouse.Y))
+                    else
+                        ClearIndicator()
+                    end
+                end))
+
+                Library:GiveSignal(InputService.InputEnded:Connect(function(Input)
+                    if not Dragging then return end
+                    if not IsClickInput(Input) then return end
+
+                    Dragging = false
+                    ClearIndicator()
+
+                    if not Moved then
+                        if Library:MouseIsOverFrame(HeaderButton) then
+                            Groupbox:ToggleCollapsed()
+                        end
+
+                        return
+                    end
+
+                    local Side = TargetSide()
+                    if not Side then return end
+
+                    local OldSide = BoxOuter.Parent
+                    local Index = DropIndex(Side, BoxOuter, Mouse.Y)
+
+                    BoxOuter.Parent = Side
+
+                    local Ordered = {}
+
+                    for _, Box in ipairs(BoxesIn(Side)) do
+                        if Box ~= BoxOuter then table.insert(Ordered, Box) end
+                    end
+
+                    table.insert(Ordered, math.clamp(Index, 1, #Ordered + 1), BoxOuter)
+
+                    for Order, Box in ipairs(Ordered) do
+                        Box.LayoutOrder = Order
+                    end
+
+                    if OldSide ~= Side then
+                        Renumber(OldSide)
+                    end
+
+                    local Left = GetSidePair(Side)
+                    Library:SaveGroupboxLayout(LayoutKey, Side == Left and "Left" or "Right", BoxOuter.LayoutOrder)
+                end))
             end
 
             Groupbox.Container = Container
@@ -9514,6 +10075,32 @@ end
     end
 
     Library.BlurEnabled = WindowInfo.Blur and true or false
+
+    --// Remember where the user left the window \\--
+    Library.RememberLayout = WindowInfo.RememberLayout and true or false
+
+    if Library.RememberLayout then
+        Library:SetFolder(Library.Folder)
+        Library:LoadWindowLayout()
+
+        local SaveQueued = false
+
+        local function QueueSave()
+            if SaveQueued or not Library.RememberLayout or Library.Unloaded then return end
+            SaveQueued = true
+
+            task.delay(1, function()
+                SaveQueued = false
+
+                if not Library.Unloaded then
+                    Library:SaveWindowLayout()
+                end
+            end)
+        end
+
+        Library:GiveSignal(Outer:GetPropertyChangedSignal("Position"):Connect(QueueSave))
+        Library:GiveSignal(Outer:GetPropertyChangedSignal("Size"):Connect(QueueSave))
+    end
 
     Window:SetBackgroundImage(WindowInfo.BackgroundImage or "")
 
