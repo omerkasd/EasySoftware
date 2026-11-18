@@ -246,7 +246,7 @@ local Library = {
     RiskColor = Color3.fromRGB(255, 50, 50);
 
     Black = Color3.new(0, 0, 0);
-    Font = Enum.Font.Code,
+    Font = Enum.Font.Ubuntu,
     Transparency = 0;
     FontCallbacks = {};
     DragBlockers = {};
@@ -6961,7 +6961,7 @@ function Library:CreateWindow(...)
         })
 
         local SearchInner = Library:Create("Frame", {
-            BackgroundColor3 = Library.MainColor;
+            BackgroundColor3 = Library.BackgroundColor;
             BorderColor3 = Library.OutlineColor;
             BorderMode = Enum.BorderMode.Inset;
             Size = UDim2.new(1, 0, 1, 0);
@@ -6970,9 +6970,11 @@ function Library:CreateWindow(...)
         })
 
         Library:AddToRegistry(SearchInner, {
-            BackgroundColor3 = "MainColor";
+            BackgroundColor3 = "BackgroundColor";
             BorderColor3 = "OutlineColor";
         })
+
+        Library:RegisterStroke(SearchInner, "OutlineColor")
 
         Library:RegisterCorner(SearchOuter, 0.6)
         Library:RegisterCorner(SearchInner, 0.6)
