@@ -48,8 +48,8 @@ if typeof(clonefunction) == "function" then
 end
 
 local ThemeManager = {} do
-	local ThemeFields = { "FontColor", "MainColor", "AccentColor", "BackgroundColor", "OutlineColor", "VideoLink", "MenuFont", "MenuTransparency" }
-	local NonColorFields = { VideoLink = true, MenuFont = true, MenuTransparency = true }
+	local ThemeFields = { "FontColor", "MainColor", "AccentColor", "BackgroundColor", "OutlineColor", "MenuFont", "MenuTransparency" }
+	local NonColorFields = { MenuFont = true, MenuTransparency = true }
 
 	local FontList = {
 		"Code", "RobotoMono", "SourceSans", "SourceSansSemibold", "SourceSansBold",
@@ -70,119 +70,6 @@ local ThemeManager = {} do
 		['Ubuntu']        = { 7, { FontColor = "ffffff", MainColor = "3e3e3e", AccentColor = "e2581e", BackgroundColor = "323232", OutlineColor = "191919" } },
 		['Quartz']        = { 8, { FontColor = "ffffff", MainColor = "232330", AccentColor = "426e87", BackgroundColor = "1d1b26", OutlineColor = "27232f" } },
 	}
-
-	-- Tells the user why nothing happened instead of failing silently.
-	local function VideoWarn(message)
-		if ThemeManager.Library and ThemeManager.Library.Notify then
-			ThemeManager.Library:Notify("Video background: " .. message, 6)
-		else
-			warn("[ThemeManager] video background: " .. message)
-		end
-	end
-
-	function ApplyBackgroundVideo(videoLink, quiet)
-		if typeof(videoLink) ~= "string" then return end
-		if not (ThemeManager.Library and ThemeManager.Library.InnerVideoBackground) then return end
-
-		local videoInstance = ThemeManager.Library.InnerVideoBackground;
-
-		--// Empty link clears the background \\--
-		if videoLink == "" then
-			pcall(function() videoInstance:Pause() end);
-			videoInstance.Video = "";
-			videoInstance.Visible = false;
-			return
-		end
-
-		--// What the executor has to provide \\--
-		local missing = {}
-		if not getassetfunc then table.insert(missing, "getcustomasset") end
-		if not httprequest  then table.insert(missing, "request") end
-		if not writefile    then table.insert(missing, "writefile") end
-		if not isfile       then table.insert(missing, "isfile") end
-
-		if #missing > 0 then
-			if not quiet then
-				VideoWarn("your executor is missing " .. table.concat(missing, ", "))
-			end
-			return
-		end
-
-		--// Variables \\--
-		local extension = videoLink:match(".*/(.-)?") or videoLink:match(".*/(.-)$"); extension = tostring(extension);
-		local filename = string.sub(extension, 0, -6);
-		local _, domain = videoLink:match("^(https?://)([^/]+)"); domain = tostring(domain); -- _ is protocol
-
-		if not videoLink:match("^https?://") then
-			if not quiet then VideoWarn("the link has to start with http:// or https://") end
-			return
-		end
-
-		if string.sub(extension, -5) ~= ".webm" then
-			if not quiet then VideoWarn("the link has to end in .webm") end
-			return
-		end
-
-		--// Fetch Video Data \\--
-		-- string.sub, not gsub: this caps the file name length, it does not replace anything
-		local videoFile = ThemeManager.Folder .. "/themes/" .. string.sub(domain .. filename, 1, 249) .. ".webm";
-
-		if not isfile(videoFile) then
-			ThemeManager:CheckFolderTree()
-
-			local success, requestRes = pcall(httprequest, { Url = videoLink, Method = "GET" })
-
-			if not (success and typeof(requestRes) == "table" and typeof(requestRes.Body) == "string") then
-				if not quiet then VideoWarn("could not download the file") end
-				return
-			end
-
-			if #requestRes.Body < 1024 then
-				if not quiet then VideoWarn("the download was empty, check the link") end
-				return
-			end
-
-			local written = pcall(writefile, videoFile, requestRes.Body)
-
-			if not written then
-				if not quiet then VideoWarn("could not write the file to disk") end
-				return
-			end
-		end
-
-		--// Play Video \\--
-		local ok, asset = pcall(getassetfunc, videoFile)
-
-		if not ok or typeof(asset) ~= "string" then
-			if not quiet then VideoWarn("getcustomasset refused the file") end
-			return
-		end
-
-		local played = pcall(function()
-			videoInstance.Video = asset;
-			videoInstance.Visible = true;
-			videoInstance:Play();
-		end)
-
-		if not played then
-			videoInstance.Visible = false
-			if not quiet then VideoWarn("Roblox refused to play the file") end
-			return
-		end
-
-		-- Roblox loads the asset asynchronously, so a codec it dislikes only shows up
-		-- a moment later as a "Failed to load rbxasset://..." line in the console.
-		task.delay(2, function()
-			local ok, loaded = pcall(function() return videoInstance.Loaded end)
-
-			if ok and loaded == false then
-				videoInstance.Visible = false
-				if not quiet then
-					VideoWarn("Roblox could not decode the file, try a VP8 or VP9 .webm with no audio track")
-				end
-			end
-		end)
-	end
 
 	function ThemeManager:SetLibrary(library)
 		self.Library = library
@@ -232,21 +119,9 @@ local ThemeManager = {} do
 		if not data then return end
 
 		-- custom themes are just regular dictionaries instead of an array with { index, dictionary }
-		if self.Library.InnerVideoBackground ~= nil then
-			self.Library.InnerVideoBackground.Visible = false
-		end
-		
 		local scheme = data[2]
 		for idx, col in next, customThemeData or scheme do
-			if idx == "VideoLink" then
-				self.Library[idx] = col
-				
-				if self.Library.Options[idx] then
-					self.Library.Options[idx]:SetValue(col)
-				end
-				
-				ApplyBackgroundVideo(col)
-			elseif NonColorFields[idx] then
+			if NonColorFields[idx] then
 				if self.Library.Options[idx] then
 					self.Library.Options[idx]:SetValue(col)
 				end
@@ -264,18 +139,11 @@ local ThemeManager = {} do
 
 	function ThemeManager:ThemeUpdate()
 		-- This allows us to force apply themes without loading the themes tab :)
-		if self.Library.InnerVideoBackground ~= nil then
-			self.Library.InnerVideoBackground.Visible = false
-		end
-
 		for i, field in next, ThemeFields do
 			if self.Library.Options and self.Library.Options[field] then
 				local value = self.Library.Options[field].Value
 
-				if field == "VideoLink" then
-					self.Library[field] = value
-					ApplyBackgroundVideo(value, true)
-				elseif field == "MenuFont" then
+				if field == "MenuFont" then
 					local fontEnum = Enum.Font[tostring(value)]
 					if fontEnum then self.Library.Font = fontEnum end
 				elseif field == "MenuTransparency" then
@@ -409,12 +277,6 @@ local ThemeManager = {} do
 		groupbox:AddLabel('Accent color'):AddColorPicker('AccentColor', { Default = self.Library.AccentColor });
 		groupbox:AddLabel('Outline color'):AddColorPicker('OutlineColor', { Default = self.Library.OutlineColor });
 		groupbox:AddLabel('Font color')	:AddColorPicker('FontColor', { Default = self.Library.FontColor });
-		groupbox:AddInput('VideoLink', {
-			Text = '.webm Video Background (Link)',
-			Default = self.Library.VideoLink,
-			Placeholder = 'https://.../file.webm',
-			Finished = true, -- apply on Enter, not on every keystroke
-		});
 
 		local currentFont = 1
 		for i, name in next, FontList do
@@ -525,12 +387,6 @@ local ThemeManager = {} do
 		self.Library.Options.AccentColor:OnChanged(UpdateTheme)
 		self.Library.Options.OutlineColor:OnChanged(UpdateTheme)
 		self.Library.Options.FontColor:OnChanged(UpdateTheme)
-
-		self.Library.Options.VideoLink:OnChanged(function()
-			local link = self.Library.Options.VideoLink.Value
-			self.Library.VideoLink = link
-			ApplyBackgroundVideo(link)
-		end)
 
 		self.Library.Options.MenuFont:OnChanged(function()
 			self.Library:SetFont(self.Library.Options.MenuFont.Value)
