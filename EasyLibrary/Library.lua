@@ -250,6 +250,8 @@ local Library = {
     Transparency = 0;
     FontCallbacks = {};
     DragBlockers = {};
+    CornerRadius = 5;
+    Corners = {};
 
     -- frames --
     OpenedFrames = {};
@@ -584,6 +586,43 @@ function Library:RegisterTransparency(Instance)
 
     Instance.BackgroundTransparency = Library.Transparency
     return Instance
+end
+
+-- Rounded corners. Legacy BorderSizePixel borders do not follow a UICorner, so a
+-- frame that gets a corner has its border turned off and a UIStroke put on instead.
+function Library:RegisterCorner(Instance, Multiplier)
+    Multiplier = tonumber(Multiplier) or 1
+
+    local Corner = Library:Create("UICorner", {
+        CornerRadius = UDim.new(0, math.floor(Library.CornerRadius * Multiplier));
+        Parent = Instance;
+    })
+
+    table.insert(Library.Corners, { Corner = Corner, Multiplier = Multiplier })
+    return Corner
+end
+
+function Library:RegisterStroke(Instance, ColorIdx, Thickness)
+    Instance.BorderSizePixel = 0
+
+    local Stroke = Library:Create("UIStroke", {
+        Color = Library[ColorIdx] or Color3.new(0, 0, 0);
+        Thickness = Thickness or 1;
+        ApplyStrokeMode = Enum.ApplyStrokeMode.Border;
+        Parent = Instance;
+    })
+
+    Library:AddToRegistry(Stroke, { Color = ColorIdx; })
+    return Stroke
+end
+
+-- 0 gives the old square look back.
+function Library:SetCornerRadius(Value)
+    Library.CornerRadius = math.max(tonumber(Value) or 0, 0)
+
+    for _, Entry in next, Library.Corners do
+        Entry.Corner.CornerRadius = UDim.new(0, math.floor(Library.CornerRadius * Entry.Multiplier))
+    end
 end
 
 function Library:SetFont(Font)
@@ -1166,6 +1205,7 @@ function Library:Unload()
 
     table.clear(Library.DragBlockers)
     table.clear(Library.FontCallbacks)
+    table.clear(Library.Corners)
     Library.SearchBox = nil
 
     Library.Unloaded = true
@@ -6081,6 +6121,9 @@ do
 
         Library:RegisterTransparency(BoxOuter)
 
+        Library:RegisterCorner(BoxOuter)
+        Library:RegisterStroke(BoxOuter, "OutlineColor")
+
         local BoxInner = Library:Create("Frame", {
             BackgroundColor3 = Library.BackgroundColor;
             BorderColor3 = Color3.new(0, 0, 0);
@@ -6097,6 +6140,9 @@ do
 
         Library:RegisterTransparency(BoxInner)
 
+        BoxInner.BorderSizePixel = 0
+        Library:RegisterCorner(BoxInner)
+
         local Highlight = Library:Create("Frame", {
             BackgroundColor3 = Library.AccentColor;
             BorderSizePixel = 0;
@@ -6108,6 +6154,9 @@ do
         Library:AddToRegistry(Highlight, {
             BackgroundColor3 = "AccentColor";
         })
+
+        Library:RegisterCorner(Highlight, 0.4)
+
 
         local Container = Library:Create("Frame", {
             BackgroundTransparency = 1;
@@ -6668,6 +6717,10 @@ function Library:CreateWindow(...)
 
     Library:RegisterTransparency(Inner)
 
+    Library:RegisterCorner(Outer)
+    Library:RegisterCorner(Inner)
+    Library:RegisterStroke(Inner, "AccentColor")
+
     local WindowLabel = Library:CreateLabel({
         Position = UDim2.new(0, 7, 0, 0);
         Size = UDim2.new(0, 0, 0, 25);
@@ -6826,6 +6879,9 @@ function Library:CreateWindow(...)
             BorderColor3 = "OutlineColor";
         })
 
+        Library:RegisterCorner(SearchOuter, 0.6)
+        Library:RegisterCorner(SearchInner, 0.6)
+
         SearchBox = Library:Create("TextBox", {
             BackgroundTransparency = 1;
             Position = UDim2.new(0, 5, 0, 0);
@@ -6878,6 +6934,9 @@ function Library:CreateWindow(...)
 
     Library:RegisterTransparency(MainSectionOuter)
 
+    Library:RegisterCorner(MainSectionOuter)
+    Library:RegisterStroke(MainSectionOuter, "OutlineColor")
+
     local MainSectionInner = Library:Create("Frame", {
         BackgroundColor3 = Library.BackgroundColor;
         BorderColor3 = Color3.new(0, 0, 0);
@@ -6893,6 +6952,9 @@ function Library:CreateWindow(...)
     })
 
     Library:RegisterTransparency(MainSectionInner)
+
+    MainSectionInner.BorderSizePixel = 0
+    Library:RegisterCorner(MainSectionInner)
 
     local TabArea = Library:Create("ScrollingFrame", {
         ScrollingDirection = Enum.ScrollingDirection.X;
@@ -6944,6 +7006,9 @@ function Library:CreateWindow(...)
     })
     
     Library:RegisterTransparency(TabContainer)
+
+    Library:RegisterCorner(TabContainer)
+    Library:RegisterStroke(TabContainer, "OutlineColor")
 
     local InnerVideoBackground = Library:Create("VideoFrame", {
         BackgroundColor3 = Library.MainColor;
@@ -7515,6 +7580,9 @@ function Library:CreateWindow(...)
         })
 
         Library:RegisterTransparency(TabButton)
+
+        TabButton.BorderSizePixel = 0
+        Library:RegisterCorner(TabButton, 0.8)
 
         table.insert(Library.FontCallbacks, function()
             TabButton.Size = UDim2.new(0, Library:GetTextBounds(Tab.Name, Library.Font, 16) + 8 + 4, 0.85, 0)
@@ -8172,6 +8240,9 @@ end
 
             Library:RegisterTransparency(BoxOuter)
 
+            Library:RegisterCorner(BoxOuter)
+            Library:RegisterStroke(BoxOuter, "OutlineColor")
+
             local BoxInner = Library:Create("Frame", {
                 BackgroundColor3 = Library.BackgroundColor;
                 BorderColor3 = Color3.new(0, 0, 0);
@@ -8188,6 +8259,9 @@ end
 
             Library:RegisterTransparency(BoxInner)
 
+            BoxInner.BorderSizePixel = 0
+            Library:RegisterCorner(BoxInner)
+
             local Highlight = Library:Create("Frame", {
                 BackgroundColor3 = Library.AccentColor;
                 BorderSizePixel = 0;
@@ -8199,6 +8273,8 @@ end
             Library:AddToRegistry(Highlight, {
                 BackgroundColor3 = "AccentColor";
             })
+
+            Library:RegisterCorner(Highlight, 0.4)
 
             local GroupboxLabel = Library:CreateLabel({
                 Size = UDim2.new(1, -24, 0, 18);
@@ -8345,6 +8421,9 @@ end
 
             Library:RegisterTransparency(BoxOuter)
 
+            Library:RegisterCorner(BoxOuter)
+            Library:RegisterStroke(BoxOuter, "OutlineColor")
+
             local BoxInner = Library:Create("Frame", {
                 BackgroundColor3 = Library.BackgroundColor;
                 BorderColor3 = Color3.new(0, 0, 0);
@@ -8361,6 +8440,9 @@ end
 
             Library:RegisterTransparency(BoxInner)
 
+            BoxInner.BorderSizePixel = 0
+            Library:RegisterCorner(BoxInner)
+
             local Highlight = Library:Create("Frame", {
                 BackgroundColor3 = Library.AccentColor;
                 BorderSizePixel = 0;
@@ -8372,6 +8454,8 @@ end
             Library:AddToRegistry(Highlight, {
                 BackgroundColor3 = "AccentColor";
             })
+
+            Library:RegisterCorner(Highlight, 0.4)
 
             local TabboxLabel, CollapseArrow, CollapseButton
 
