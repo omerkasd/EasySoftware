@@ -7564,28 +7564,33 @@ function Library:CreateWindow(...)
             TableType = "Tab";
         }
 
+        local TabButtonPadding = 20
         local TabButtonWidth = Library:GetTextBounds(Tab.Name, Library.Font, 16)
 
         local TabButton = Library:Create("Frame", {
-            BackgroundColor3 = Library.BackgroundColor;
-            BorderColor3 = Library.OutlineColor;
-            Size = UDim2.new(0, TabButtonWidth + 8 + 4, 0.85, 0);
+            BackgroundTransparency = 1;
+            BorderSizePixel = 0;
+            Size = UDim2.new(0, TabButtonWidth + TabButtonPadding, 1, 0);
             ZIndex = 1;
             Parent = TabArea;
         })
 
-        Library:AddToRegistry(TabButton, {
-            BackgroundColor3 = "BackgroundColor";
-            BorderColor3 = "OutlineColor";
+        -- the accent bar that marks the open tab
+        local TabUnderline = Library:Create("Frame", {
+            BackgroundColor3 = Library.AccentColor;
+            BorderSizePixel = 0;
+            AnchorPoint = Vector2.new(0.5, 1);
+            Position = UDim2.new(0.5, 0, 1, 0);
+            Size = UDim2.new(0, 0, 0, 2);
+            ZIndex = 2;
+            Parent = TabButton;
         })
 
-        Library:RegisterTransparency(TabButton)
-
-        TabButton.BorderSizePixel = 0
-        Library:RegisterCorner(TabButton, 0.8)
+        Library:AddToRegistry(TabUnderline, { BackgroundColor3 = "AccentColor"; })
+        Library:RegisterCorner(TabUnderline, 0.4)
 
         table.insert(Library.FontCallbacks, function()
-            TabButton.Size = UDim2.new(0, Library:GetTextBounds(Tab.Name, Library.Font, 16) + 8 + 4, 0.85, 0)
+            TabButton.Size = UDim2.new(0, Library:GetTextBounds(Tab.Name, Library.Font, 16) + TabButtonPadding, 1, 0)
         end)
 
         local TabButtonLabel = Library:CreateLabel({
@@ -7596,12 +7601,14 @@ function Library:CreateWindow(...)
             Parent = TabButton;
         })
 
+        -- kept so nothing downstream breaks, but a flat tab row has no seam to hide
         local Blocker = Library:Create("Frame", {
             BackgroundColor3 = Library.MainColor;
             BorderSizePixel = 0;
             Position = UDim2.new(0, 0, 1, 0);
             Size = UDim2.new(1, 0, 0, 1);
             BackgroundTransparency = 1;
+            Visible = false;
             ZIndex = 3;
             Parent = TabButton;
         })
@@ -7609,6 +7616,21 @@ function Library:CreateWindow(...)
         Library:AddToRegistry(Blocker, {
             BackgroundColor3 = "MainColor";
         })
+
+        local TabHovering = false
+
+        local function RefreshTabLabel()
+            local Key = (Library.ActiveTab == Name or TabHovering) and "AccentColor" or "FontColor"
+
+            TabButtonLabel.TextColor3 = Library[Key]
+
+            if Library.RegistryMap[TabButtonLabel] then
+                Library.RegistryMap[TabButtonLabel].Properties.TextColor3 = Key
+            end
+        end
+
+        TabButton.MouseEnter:Connect(function() TabHovering = true  RefreshTabLabel() end)
+        TabButton.MouseLeave:Connect(function() TabHovering = false RefreshTabLabel() end)
 
         local TabFrame = Library:Create("Frame", {
             Name = "TabFrame",
@@ -7875,20 +7897,28 @@ end
                 Tab:HideTab()
             end
 
-            Blocker.BackgroundTransparency = 0
-            TabButton.BackgroundColor3 = Library.MainColor
-            Library.RegistryMap[TabButton].Properties.BackgroundColor3 = "MainColor"
             TabFrame.Visible = true
+            RefreshTabLabel()
+
+            TweenService:Create(
+                TabUnderline,
+                TweenInfo.new(0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Size = UDim2.new(1, -10, 0, 2) }
+            ):Play()
 
             Tab:Resize()
         end
         Tab.Show = Tab.ShowTab
 
         function Tab:HideTab()
-            Blocker.BackgroundTransparency = 1
-            TabButton.BackgroundColor3 = Library.BackgroundColor
-            Library.RegistryMap[TabButton].Properties.BackgroundColor3 = "BackgroundColor"
             TabFrame.Visible = false
+            RefreshTabLabel()
+
+            TweenService:Create(
+                TabUnderline,
+                TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+                { Size = UDim2.new(0, 0, 0, 2) }
+            ):Play()
         end
         Tab.Hide = Tab.HideTab
 
