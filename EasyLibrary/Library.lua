@@ -252,6 +252,7 @@ local Library = {
     DragBlockers = {};
     CornerRadius = 5;
     Corners = {};
+    AnimationSpeed = 0.12;
 
     -- frames --
     OpenedFrames = {};
@@ -613,6 +614,37 @@ function Library:RegisterStroke(Instance, ColorIdx, Thickness)
 
     Library:AddToRegistry(Stroke, { Color = ColorIdx; })
     return Stroke
+end
+
+-- Tween a property change. Library.AnimationSpeed = 0 makes everything instant again.
+function Library:Animate(Instance, Properties, Multiplier)
+    local Time = Library.AnimationSpeed * (tonumber(Multiplier) or 1)
+
+    if Time <= 0 then
+        for Property, Value in next, Properties do
+            Instance[Property] = Value
+        end
+
+        return
+    end
+
+    local Ok = pcall(function()
+        TweenService:Create(
+            Instance,
+            TweenInfo.new(Time, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+            Properties
+        ):Play()
+    end)
+
+    if not Ok then
+        for Property, Value in next, Properties do
+            Instance[Property] = Value
+        end
+    end
+end
+
+function Library:SetAnimationSpeed(Value)
+    Library.AnimationSpeed = math.max(tonumber(Value) or 0, 0)
 end
 
 -- 0 gives the old square look back.
@@ -1051,22 +1083,36 @@ function Library:MouseIsOverOpenedFrame(Input)
 end
 
 function Library:OnHighlight(HighlightInstance, Instance, Properties, PropertiesDefault, condition)
-    local function undoHighlight()
-        local Reg = Library.RegistryMap[Instance]
+    -- MouseMoved fires every frame, so only act when the state actually flips,
+    -- otherwise the tween would restart forever and never land
+    local Highlighted = nil
 
-        for Property, ColorIdx in next, PropertiesDefault do
-            Instance[Property] = Library[ColorIdx] or ColorIdx
+    local function Apply(Set, State)
+        if Highlighted == State then return end
+        Highlighted = State
+
+        local Reg = Library.RegistryMap[Instance]
+        local Goals = {}
+
+        for Property, ColorIdx in next, Set do
+            Goals[Property] = Library[ColorIdx] or ColorIdx
 
             if Reg and Reg.Properties[Property] then
                 Reg.Properties[Property] = ColorIdx
             end
         end
+
+        Library:Animate(Instance, Goals)
+    end
+
+    local function undoHighlight()
+        Apply(PropertiesDefault, false)
     end
 
     local function doHighlight()
-        if condition and not condition() then 
+        if condition and not condition() then
             undoHighlight()
-            return 
+            return
         end
 
         if Library.ActiveDialog and not Library:IsFrameInsideDialog(Instance) then
@@ -1074,15 +1120,7 @@ function Library:OnHighlight(HighlightInstance, Instance, Properties, Properties
             return
         end
 
-        local Reg = Library.RegistryMap[Instance]
-
-        for Property, ColorIdx in next, Properties do
-            Instance[Property] = Library[ColorIdx] or ColorIdx
-
-            if Reg and Reg.Properties[Property] then
-                Reg.Properties[Property] = ColorIdx
-            end
-        end
+        Apply(Properties, true)
     end
 
     HighlightInstance.MouseEnter:Connect(doHighlight)
@@ -1246,7 +1284,8 @@ local Templates = { -- TO-DO: do it for missing elements.
         UnlockMouseWhileOpen = true,
         Center = false,
         Resizable = false,
-        Searchable = true
+        Searchable = true,
+        QuickBar = true
     },
 
     --// Elements \\--
@@ -4209,7 +4248,7 @@ do
             BorderColor3 = "OutlineColor";
         })
 
-        Library:RegisterStroke(ToggleInner, "OutlineColor")
+        local ToggleStroke = Library:RegisterStroke(ToggleInner, "OutlineColor")
         Library:RegisterCorner(ToggleInner, 0.5)
 
         local ToggleLabel = Library:CreateLabel({
@@ -4262,12 +4301,19 @@ do
             Tooltip.Disabled = Toggle.Disabled
         end
 
+        local function SetToggleStroke(ColorIdx)
+            Library:Animate(ToggleStroke, { Color = Library[ColorIdx] })
+
+            if Library.RegistryMap[ToggleStroke] then
+                Library.RegistryMap[ToggleStroke].Properties.Color = ColorIdx
+            end
+        end
+
         function Toggle:Display()
             if Toggle.Disabled then
-                ToggleLabel.TextColor3 = Library.DisabledTextColor
-
-                ToggleInner.BackgroundColor3 = Toggle.Value and Library.DisabledAccentColor or Library.MainColor
-                ToggleInner.BorderColor3 = Library.DisabledOutlineColor
+                Library:Animate(ToggleLabel, { TextColor3 = Library.DisabledTextColor })
+                Library:Animate(ToggleInner, { BackgroundColor3 = Toggle.Value and Library.DisabledAccentColor or Library.MainColor })
+                SetToggleStroke("DisabledOutlineColor")
 
                 Library.RegistryMap[ToggleInner].Properties.BackgroundColor3 = Toggle.Value and "DisabledAccentColor" or "MainColor"
                 Library.RegistryMap[ToggleInner].Properties.BorderColor3 = "DisabledOutlineColor"
@@ -4276,10 +4322,9 @@ do
                 return
             end
 
-            ToggleLabel.TextColor3 = Toggle.Risky and Library.RiskColor or Color3.new(1, 1, 1)
-
-            ToggleInner.BackgroundColor3 = Toggle.Value and Library.AccentColor or Library.MainColor
-            ToggleInner.BorderColor3 = Toggle.Value and Library.AccentColorDark or Library.OutlineColor
+            Library:Animate(ToggleLabel, { TextColor3 = Toggle.Risky and Library.RiskColor or Color3.new(1, 1, 1) })
+            Library:Animate(ToggleInner, { BackgroundColor3 = Toggle.Value and Library.AccentColor or Library.MainColor })
+            SetToggleStroke(Toggle.Value and "AccentColorDark" or "OutlineColor")
 
             Library.RegistryMap[ToggleInner].Properties.BackgroundColor3 = Toggle.Value and "AccentColor" or "MainColor"
             Library.RegistryMap[ToggleInner].Properties.BorderColor3 = Toggle.Value and "AccentColorDark" or "OutlineColor"
@@ -4566,7 +4611,7 @@ do
             end
 
             local X = Library:MapValue(Slider.Value, Slider.Min, Slider.Max, 0, 1)
-            Fill.Size = UDim2.new(X, 0, 1, 0)
+            Library:Animate(Fill, { Size = UDim2.new(X, 0, 1, 0) }, 0.5)
 
             -- I have no idea what this is
             HideBorderRight.Visible = not (X == 1 or X == 0)
@@ -6541,6 +6586,154 @@ do
         end
 
         Library:SetWatermarkVisibility(false)
+    end
+end
+
+--// Quick bar: Watermark / Menu / Keybinds \\--
+do
+    local ButtonPadding = 4
+    local Entries = {}
+
+    local QuickOuter = Library:Create("Frame", {
+        AnchorPoint = Vector2.new(0.5, 0);
+        BackgroundColor3 = Color3.new(0, 0, 0);
+        BorderSizePixel = 0;
+        Position = UDim2.new(0.5, 0, 0, -25);
+        Size = UDim2.new(0, 220, 0, 22);
+        ZIndex = 200;
+        Visible = false;
+        Parent = ScreenGui;
+    })
+
+    local QuickInner = Library:Create("Frame", {
+        BackgroundColor3 = Library.MainColor;
+        BorderSizePixel = 0;
+        Position = UDim2.new(0, 1, 0, 1);
+        Size = UDim2.new(1, -2, 1, -2);
+        ZIndex = 201;
+        Parent = QuickOuter;
+    })
+
+    Library:AddToRegistry(QuickInner, { BackgroundColor3 = "MainColor"; })
+    Library:RegisterStroke(QuickInner, "AccentColor")
+    Library:RegisterCorner(QuickInner, 0.8)
+    Library:RegisterCorner(QuickOuter, 0.8)
+
+    local Holder = Library:Create("Frame", {
+        BackgroundTransparency = 1;
+        Size = UDim2.new(1, 0, 1, 0);
+        ZIndex = 202;
+        Parent = QuickInner;
+    })
+
+    Library:Create("UIListLayout", {
+        Padding = UDim.new(0, ButtonPadding);
+        FillDirection = Enum.FillDirection.Horizontal;
+        HorizontalAlignment = Enum.HorizontalAlignment.Center;
+        VerticalAlignment = Enum.VerticalAlignment.Center;
+        SortOrder = Enum.SortOrder.LayoutOrder;
+        Parent = Holder;
+    })
+
+    local function Measure()
+        local Total = 0
+
+        for _, Entry in next, Entries do
+            Entry.Width = Library:GetTextBounds(Entry.Name, Library.Font, 14) + 18
+            Entry.Button.Size = UDim2.new(0, Entry.Width, 1, -4)
+            Total = Total + Entry.Width
+        end
+
+        Total = Total + ButtonPadding * math.max(#Entries - 1, 0) + 10
+        QuickOuter.Size = UDim2.new(0, Total, 0, 22)
+    end
+
+    local function Refresh()
+        for _, Entry in next, Entries do
+            local On = false
+            pcall(function() On = Entry.Get() and true or false end)
+
+            local Key = (On or Entry.Hovering) and "AccentColor" or "FontColor"
+
+            Library:Animate(Entry.Label, { TextColor3 = Library[Key] })
+
+            if Library.RegistryMap[Entry.Label] then
+                Library.RegistryMap[Entry.Label].Properties.TextColor3 = Key
+            end
+        end
+    end
+
+    local function AddButton(Name, Get, Toggle)
+        local Entry = { Name = Name, Get = Get, Hovering = false }
+
+        Entry.Button = Library:Create("Frame", {
+            BackgroundTransparency = 1;
+            Size = UDim2.new(0, 60, 1, -4);
+            LayoutOrder = #Entries + 1;
+            ZIndex = 203;
+            Parent = Holder;
+        })
+
+        Entry.Label = Library:CreateLabel({
+            BackgroundTransparency = 1;
+            Size = UDim2.new(1, 0, 1, 0);
+            TextSize = 14;
+            Text = Name;
+            TextXAlignment = Enum.TextXAlignment.Center;
+            ZIndex = 204;
+            Parent = Entry.Button;
+        })
+
+        local Region = Library:Create("TextButton", {
+            BackgroundTransparency = 1;
+            Size = UDim2.new(1, 0, 1, 0);
+            Text = "";
+            ZIndex = 205;
+            Parent = Entry.Button;
+        })
+
+        Entry.Button.MouseEnter:Connect(function() Entry.Hovering = true  Refresh() end)
+        Entry.Button.MouseLeave:Connect(function() Entry.Hovering = false Refresh() end)
+
+        Region.MouseButton1Click:Connect(function()
+            Library:SafeCallback(Toggle)
+            Refresh()
+        end)
+
+        table.insert(Entries, Entry)
+        table.insert(Library.DragBlockers, Entry.Button)
+
+        return Entry
+    end
+
+    AddButton("Watermark",
+        function() return Library.Watermark.Visible end,
+        function() Library:SetWatermarkVisibility(not Library.Watermark.Visible) end)
+
+    AddButton("Menu",
+        function() return Library.Toggled end,
+        function() if Library.Toggle then Library:Toggle() end end)
+
+    AddButton("Keybinds",
+        function() return Library.KeybindFrame.Visible end,
+        function() Library.KeybindFrame.Visible = not Library.KeybindFrame.Visible end)
+
+    Measure()
+    Refresh()
+
+    table.insert(Library.FontCallbacks, Measure)
+    Library:MakeDraggable(QuickOuter)
+
+    -- keep the labels in step when something is toggled elsewhere
+    Library:GiveSignal(Library.Watermark:GetPropertyChangedSignal("Visible"):Connect(Refresh))
+    Library:GiveSignal(Library.KeybindFrame:GetPropertyChangedSignal("Visible"):Connect(Refresh))
+
+    Library.QuickBar = QuickOuter
+    Library.RefreshQuickBar = Refresh
+
+    function Library:SetQuickBarVisibility(Bool)
+        QuickOuter.Visible = Bool and true or false
+        Refresh()
     end
 end
 
@@ -8982,6 +9175,10 @@ end
         Toggled = (not Toggled)
 
         Library.Toggled = Toggled
+
+        if Library.RefreshQuickBar then
+            Library.RefreshQuickBar()
+        end
         if WindowInfo.UnlockMouseWhileOpen then
             ModalElement.Modal = Library.Toggled
         end
@@ -9264,6 +9461,11 @@ end
     end
 
     Window:SetBackgroundImage(WindowInfo.BackgroundImage or "")
+
+    if WindowInfo.QuickBar then
+        Library:SetQuickBarVisibility(true)
+    end
+
     if WindowInfo.AutoShow then task.spawn(Library.Toggle) end
 
     Window.Holder = Outer
