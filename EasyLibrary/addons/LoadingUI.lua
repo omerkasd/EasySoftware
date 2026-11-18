@@ -63,6 +63,12 @@ local LoadingUI = {} do
             BorderColor3 = "AccentColor";
         })
 
+        if Library.RegisterCorner then
+            Library:RegisterCorner(Outer)
+            Library:RegisterCorner(Inner)
+            Library:RegisterStroke(Inner, "AccentColor")
+        end
+
         --// Text \\--
         local TitleLabel = Library:CreateLabel({
             BackgroundTransparency = 1;
@@ -126,6 +132,12 @@ local LoadingUI = {} do
         Library:AddToRegistry(BarFill, {
             BackgroundColor3 = "AccentColor";
         })
+
+        if Library.RegisterCorner then
+            Library:RegisterCorner(BarOuter, 0.5)
+            Library:RegisterCorner(BarFill, 0.5)
+            Library:RegisterStroke(BarOuter, "OutlineColor")
+        end
 
         Library:Create("UIGradient", {
             Color = ColorSequence.new({
