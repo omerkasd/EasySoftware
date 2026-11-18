@@ -90,7 +90,7 @@ local Tooltips = {}
 local Dialogues = {}
 
 -- https://github.com/deividcomsono/Obsidian/blob/main/Library.lua#L30
-local BaseURL = "https://raw.githubusercontent.com/mstudio45/LinoriaLib/refs/heads/main/"
+local BaseURL = "https://raw.githubusercontent.com/omerkasd/EasySoftware/refs/heads/main/EasyLibrary/"
 local CustomImageManager = {}
 local CustomImageManagerAssets = {
     Cursor = {
@@ -6739,6 +6739,25 @@ function Library:CreateWindow(...)
         return AnyVisible
     end
 
+    -- a collapsed box opens while a search matches something inside it,
+    -- and goes back to how the user left it once the search is cleared
+    local function SyncCollapse(Box, Searching, AnyVisible)
+        if typeof(Box.SetCollapsed) ~= "function" then return end
+
+        if Searching then
+            if AnyVisible and Box.Collapsed then
+                if Box.SearchWasCollapsed == nil then
+                    Box.SearchWasCollapsed = true
+                end
+
+                Box:SetCollapsed(false)
+            end
+        elseif Box.SearchWasCollapsed ~= nil then
+            Box:SetCollapsed(Box.SearchWasCollapsed)
+            Box.SearchWasCollapsed = nil
+        end
+    end
+
     function Window:ApplySearch(Query)
         Query = string.lower(tostring(Query or ""))
         local Searching = Query ~= ""
@@ -6746,6 +6765,8 @@ function Library:CreateWindow(...)
         for _, Tab in next, Window.Tabs do
             for _, Groupbox in next, Tab.Groupboxes do
                 local AnyVisible = FilterBox(Groupbox, Query, Searching)
+
+                SyncCollapse(Groupbox, Searching, AnyVisible)
 
                 if Groupbox.BoxOuter then
                     Groupbox.BoxOuter.Visible = (not Searching) or AnyVisible
@@ -6760,6 +6781,8 @@ function Library:CreateWindow(...)
                         AnyVisible = true
                     end
                 end
+
+                SyncCollapse(Tabbox, Searching, AnyVisible)
 
                 if Tabbox.BoxOuter then
                     Tabbox.BoxOuter.Visible = (not Searching) or AnyVisible
@@ -7821,6 +7844,8 @@ end
                 Side = Info.Side;
                 Tab = Tab;
                 TableType = "Groupbox";
+                Collapsible = if typeof(Info.Collapsible) == "boolean" then Info.Collapsible else true;
+                Collapsed = false;
             }
 
             local BoxOuter = Library:Create("Frame", {
@@ -7867,9 +7892,8 @@ end
                 BackgroundColor3 = "AccentColor";
             })
 
-            -- local GroupboxLabel = 
-            Library:CreateLabel({
-                Size = UDim2.new(1, 0, 0, 18);
+            local GroupboxLabel = Library:CreateLabel({
+                Size = UDim2.new(1, -24, 0, 18);
                 Position = UDim2.new(0, 4, 0, 2);
                 TextSize = 14;
                 Text = Info.Name;
@@ -7877,6 +7901,29 @@ end
                 ZIndex = 5;
                 Parent = BoxInner;
             })
+
+            local CollapseArrow, CollapseButton
+
+            if Groupbox.Collapsible then
+                CollapseArrow = Library:CreateLabel({
+                    Size = UDim2.new(0, 16, 0, 18);
+                    Position = UDim2.new(1, -20, 0, 2);
+                    TextSize = 14;
+                    Text = "-";
+                    TextXAlignment = Enum.TextXAlignment.Center;
+                    ZIndex = 6;
+                    Parent = BoxInner;
+                })
+
+                CollapseButton = Library:Create("TextButton", {
+                    BackgroundTransparency = 1;
+                    Position = UDim2.new(0, 0, 0, 2);
+                    Size = UDim2.new(1, 0, 0, 18);
+                    Text = "";
+                    ZIndex = 7;
+                    Parent = BoxInner;
+                })
+            end
 
             local Container = Library:Create("Frame", {
                 BackgroundTransparency = 1;
@@ -7895,13 +7942,43 @@ end
             function Groupbox:Resize()
                 local Size = 0
 
-                for _, Element in next, Groupbox.Container:GetChildren() do
-                    if (not Element:IsA("UIListLayout")) and Element.Visible then
-                        Size = Size + Element.Size.Y.Offset
+                if not Groupbox.Collapsed then
+                    for _, Element in next, Groupbox.Container:GetChildren() do
+                        if (not Element:IsA("UIListLayout")) and Element.Visible then
+                            Size = Size + Element.Size.Y.Offset
+                        end
                     end
                 end
 
                 BoxOuter.Size = UDim2.new(1, 0, 0, (20 * DPIScale + Size) + 2 + 2)
+            end
+
+            function Groupbox:SetCollapsed(State)
+                if not Groupbox.Collapsible then return end
+
+                Groupbox.Collapsed = State and true or false
+                Container.Visible = not Groupbox.Collapsed
+
+                if CollapseArrow then
+                    CollapseArrow.Text = Groupbox.Collapsed and "+" or "-"
+                end
+
+                Groupbox:Resize()
+            end
+
+            function Groupbox:ToggleCollapsed()
+                Groupbox:SetCollapsed(not Groupbox.Collapsed)
+            end
+
+            if CollapseButton then
+                CollapseButton.MouseButton1Click:Connect(function()
+                    Groupbox:ToggleCollapsed()
+                end)
+
+                Library:OnHighlight(CollapseButton, GroupboxLabel,
+                    { TextColor3 = "AccentColor" },
+                    { TextColor3 = "FontColor" }
+                )
             end
 
             Groupbox.Container = Container
@@ -7911,23 +7988,38 @@ end
             Groupbox:AddBlank(3)
             Groupbox:Resize()
 
+            if Info.Collapsed then
+                Groupbox:SetCollapsed(true)
+            end
+
             Tab.Groupboxes[Info.Name] = Groupbox
 
             return Groupbox
         end
 
-        function Tab:AddLeftGroupbox(Name)
-            return Tab:AddGroupbox({ Side = 1; Name = Name; })
+        function Tab:AddLeftGroupbox(Name, Options)
+            Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+            return Tab:AddGroupbox({ Side = 1; Name = Name; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
         end
 
-        function Tab:AddRightGroupbox(Name)
-            return Tab:AddGroupbox({ Side = 2; Name = Name; })
+        function Tab:AddRightGroupbox(Name, Options)
+            Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+            return Tab:AddGroupbox({ Side = 2; Name = Name; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
         end
 
         function Tab:AddTabbox(Info)
+            local Title = typeof(Info.Name) == "string" and Info.Name ~= "" and Info.Name or nil
+            local HeaderHeight = Title and 18 or 0
+
             local Tabbox = {
                 Tabs = {};
+                ActiveTab = nil;
+                TableType = "Tabbox";
+                Collapsible = Title ~= nil and (if typeof(Info.Collapsible) == "boolean" then Info.Collapsible else true);
+                Collapsed = false;
             }
+
+            local TabOrder = 0
 
             local BoxOuter = Library:Create("Frame", {
                 BackgroundColor3 = Library.BackgroundColor;
@@ -7973,9 +8065,44 @@ end
                 BackgroundColor3 = "AccentColor";
             })
 
+            local TabboxLabel, CollapseArrow, CollapseButton
+
+            if Title then
+                TabboxLabel = Library:CreateLabel({
+                    Size = UDim2.new(1, -24, 0, 18);
+                    Position = UDim2.new(0, 4, 0, 2);
+                    TextSize = 14;
+                    Text = Title;
+                    TextXAlignment = Enum.TextXAlignment.Left;
+                    ZIndex = 5;
+                    Parent = BoxInner;
+                })
+
+                if Tabbox.Collapsible then
+                    CollapseArrow = Library:CreateLabel({
+                        Size = UDim2.new(0, 16, 0, 18);
+                        Position = UDim2.new(1, -20, 0, 2);
+                        TextSize = 14;
+                        Text = "-";
+                        TextXAlignment = Enum.TextXAlignment.Center;
+                        ZIndex = 6;
+                        Parent = BoxInner;
+                    })
+
+                    CollapseButton = Library:Create("TextButton", {
+                        BackgroundTransparency = 1;
+                        Position = UDim2.new(0, 0, 0, 2);
+                        Size = UDim2.new(1, 0, 0, 18);
+                        Text = "";
+                        ZIndex = 7;
+                        Parent = BoxInner;
+                    })
+                end
+            end
+
             local TabboxButtons = Library:Create("Frame", {
                 BackgroundTransparency = 1;
-                Position = UDim2.new(0, 0, 0, 1);
+                Position = UDim2.new(0, 0, 0, 1 + HeaderHeight);
                 Size = UDim2.new(1, 0, 0, 18);
                 ZIndex = 5;
                 Parent = BoxInner;
@@ -7995,10 +8122,13 @@ end
                     TableType = "TabboxTab";
                 }
 
+                TabOrder = TabOrder + 1
+
                 local Button = Library:Create("Frame", {
                     BackgroundColor3 = Library.MainColor;
                     BorderColor3 = Color3.new(0, 0, 0);
                     Size = UDim2.new(0.5, 0, 1, 0);
+                    LayoutOrder = TabOrder;
                     ZIndex = 6;
                     Parent = TabboxButtons;
                 })
@@ -8007,8 +8137,7 @@ end
                     BackgroundColor3 = "MainColor";
                 })
 
-                -- local ButtonLabel = 
-                Library:CreateLabel({
+                local ButtonLabel = Library:CreateLabel({
                     Size = UDim2.new(1, 0, 1, 0);
                     TextSize = 14;
                     Text = Name;
@@ -8017,6 +8146,22 @@ end
                     Parent = Button;
                     RichText = true;
                 })
+
+                -- the label goes accent while the tab is active or hovered
+                local Hovering = false
+
+                local function RefreshLabel()
+                    local Key = (Tabbox.ActiveTab == Name or Hovering) and "AccentColor" or "FontColor"
+
+                    ButtonLabel.TextColor3 = Library[Key]
+
+                    if Library.RegistryMap[ButtonLabel] then
+                        Library.RegistryMap[ButtonLabel].Properties.TextColor3 = Key
+                    end
+                end
+
+                Button.MouseEnter:Connect(function() Hovering = true  RefreshLabel() end)
+                Button.MouseLeave:Connect(function() Hovering = false RefreshLabel() end)
 
                 local Block = Library:Create("Frame", {
                     BackgroundColor3 = Library.BackgroundColor;
@@ -8034,8 +8179,8 @@ end
 
                 local Container = Library:Create("Frame", {
                     BackgroundTransparency = 1;
-                    Position = UDim2.new(0, 4, 0, 20);
-                    Size = UDim2.new(1, -4, 1, -20);
+                    Position = UDim2.new(0, 4, 0, 20 + HeaderHeight);
+                    Size = UDim2.new(1, -4, 1, -20 - HeaderHeight);
                     ZIndex = 1;
                     Visible = false;
                     Parent = BoxInner;
@@ -8048,16 +8193,19 @@ end
                 })
 
                 function Tab:Show()
-                    for _, Tab in next, Tabbox.Tabs do
-                        Tab:Hide()
+                    Tabbox.ActiveTab = Name
+
+                    for _, Other in next, Tabbox.Tabs do
+                        Other:Hide()
                     end
 
-                    Container.Visible = true
-                    Block.Visible = true
+                    Container.Visible = not Tabbox.Collapsed
+                    Block.Visible = not Tabbox.Collapsed
 
                     Button.BackgroundColor3 = Library.BackgroundColor
                     Library.RegistryMap[Button].Properties.BackgroundColor3 = "BackgroundColor"
 
+                    RefreshLabel()
                     Tab:Resize()
                 end
 
@@ -8067,6 +8215,8 @@ end
 
                     Button.BackgroundColor3 = Library.MainColor
                     Library.RegistryMap[Button].Properties.BackgroundColor3 = "MainColor"
+
+                    RefreshLabel()
                 end
 
                 function Tab:Resize()
@@ -8082,6 +8232,11 @@ end
                         end
                     end
 
+                    if Tabbox.Collapsed then
+                        BoxOuter.Size = UDim2.new(1, 0, 0, (20 * DPIScale) + 2 + 2)
+                        return
+                    end
+
                     if (not Container.Visible) then
                         return
                     end
@@ -8094,7 +8249,7 @@ end
                         end
                     end
 
-                    BoxOuter.Size = UDim2.new(1, 0, 0, (20 * DPIScale + Size) + 2 + 2)
+                    BoxOuter.Size = UDim2.new(1, 0, 0, ((20 + HeaderHeight) * DPIScale + Size) + 2 + 2)
                 end
 
                 Button.InputBegan:Connect(function(Input)
@@ -8121,19 +8276,80 @@ end
                 return Tab
             end
 
+            function Tabbox:SetTab(Name)
+                local Target = Tabbox.Tabs[Name]
+                if not Target then return end
+
+                Target:Show()
+                Target:Resize()
+            end
+
+            function Tabbox:GetActiveTab()
+                return Tabbox.Tabs[Tabbox.ActiveTab]
+            end
+
+            function Tabbox:SetCollapsed(State)
+                if not Tabbox.Collapsible then return end
+
+                Tabbox.Collapsed = State and true or false
+                TabboxButtons.Visible = not Tabbox.Collapsed
+
+                if CollapseArrow then
+                    CollapseArrow.Text = Tabbox.Collapsed and "+" or "-"
+                end
+
+                local Active = Tabbox:GetActiveTab()
+
+                for _, SubTab in next, Tabbox.Tabs do
+                    if SubTab ~= Active then
+                        SubTab:Hide()
+                    end
+                end
+
+                if Active then
+                    if Tabbox.Collapsed then
+                        Active:Hide()
+                        Active:Resize()
+                    else
+                        Active:Show()
+                    end
+                end
+            end
+
+            function Tabbox:ToggleCollapsed()
+                Tabbox:SetCollapsed(not Tabbox.Collapsed)
+            end
+
+            if CollapseButton then
+                CollapseButton.MouseButton1Click:Connect(function()
+                    Tabbox:ToggleCollapsed()
+                end)
+
+                Library:OnHighlight(CollapseButton, TabboxLabel,
+                    { TextColor3 = "AccentColor" },
+                    { TextColor3 = "FontColor" }
+                )
+            end
+
             Tabbox.BoxOuter = BoxOuter
+
+            if Info.Collapsed then
+                task.defer(function() Tabbox:SetCollapsed(true) end)
+            end
 
             Tab.Tabboxes[Info.Name or ""] = Tabbox
 
             return Tabbox
         end
 
-        function Tab:AddLeftTabbox(Name)
-            return Tab:AddTabbox({ Name = Name, Side = 1; })
+        function Tab:AddLeftTabbox(Name, Options)
+            Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+            return Tab:AddTabbox({ Name = Name, Side = 1; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
         end
 
-        function Tab:AddRightTabbox(Name)
-            return Tab:AddTabbox({ Name = Name, Side = 2; })
+        function Tab:AddRightTabbox(Name, Options)
+            Options = Library:Validate(Options or {}, { Collapsible = true, Collapsed = false })
+            return Tab:AddTabbox({ Name = Name, Side = 2; Collapsible = Options.Collapsible; Collapsed = Options.Collapsed; })
         end
 
         TabButton.InputBegan:Connect(function(Input)
