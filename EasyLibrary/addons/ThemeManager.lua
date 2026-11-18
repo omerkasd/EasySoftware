@@ -6,7 +6,7 @@ local clonefunction = (clonefunction or copyfunction or function(func)
 end)
 
 local httprequest = request or http_request or (http and http.request)
-local getassetfunc = getcustomasset
+local getassetfunc = getcustomasset or getsynasset or get_custom_asset or (syn and syn.getcustomasset)
 
 local HttpService: HttpService = cloneref(game:GetService("HttpService"))
 local isfolder, isfile, listfiles = isfolder, isfile, listfiles;
@@ -71,41 +71,103 @@ local ThemeManager = {} do
 		['Quartz']        = { 8, { FontColor = "ffffff", MainColor = "232330", AccentColor = "426e87", BackgroundColor = "1d1b26", OutlineColor = "27232f" } },
 	}
 
-	function ApplyBackgroundVideo(videoLink)
-		if
-			typeof(videoLink) ~= "string" or
-			not (getassetfunc and writefile and readfile and isfile) or
-			not (ThemeManager.Library and ThemeManager.Library.InnerVideoBackground)
-		then return; end;
+	-- Tells the user why nothing happened instead of failing silently.
+	local function VideoWarn(message)
+		if ThemeManager.Library and ThemeManager.Library.Notify then
+			ThemeManager.Library:Notify("Video background: " .. message, 6)
+		else
+			warn("[ThemeManager] video background: " .. message)
+		end
+	end
 
-		--// Variables \\--
+	function ApplyBackgroundVideo(videoLink, quiet)
+		if typeof(videoLink) ~= "string" then return end
+		if not (ThemeManager.Library and ThemeManager.Library.InnerVideoBackground) then return end
+
 		local videoInstance = ThemeManager.Library.InnerVideoBackground;
-		local extension = videoLink:match(".*/(.-)?") or videoLink:match(".*/(.-)$"); extension = tostring(extension);
-		local filename = string.sub(extension, 0, -6);
-		local _, domain = videoLink:match("^(https?://)([^/]+)"); domain = tostring(domain); -- _ is protocol
 
-		--// Check URL \\--
+		--// Empty link clears the background \\--
 		if videoLink == "" then
-			videoInstance:Pause();
+			pcall(function() videoInstance:Pause() end);
 			videoInstance.Video = "";
 			videoInstance.Visible = false;
 			return
 		end
-		if #extension > 5 and string.sub(extension, -5) ~= ".webm" then return; end;
+
+		--// What the executor has to provide \\--
+		local missing = {}
+		if not getassetfunc then table.insert(missing, "getcustomasset") end
+		if not httprequest  then table.insert(missing, "request") end
+		if not writefile    then table.insert(missing, "writefile") end
+		if not isfile       then table.insert(missing, "isfile") end
+
+		if #missing > 0 then
+			if not quiet then
+				VideoWarn("your executor is missing " .. table.concat(missing, ", "))
+			end
+			return
+		end
+
+		--// Variables \\--
+		local extension = videoLink:match(".*/(.-)?") or videoLink:match(".*/(.-)$"); extension = tostring(extension);
+		local filename = string.sub(extension, 0, -6);
+		local _, domain = videoLink:match("^(https?://)([^/]+)"); domain = tostring(domain); -- _ is protocol
+
+		if not videoLink:match("^https?://") then
+			if not quiet then VideoWarn("the link has to start with http:// or https://") end
+			return
+		end
+
+		if string.sub(extension, -5) ~= ".webm" then
+			if not quiet then VideoWarn("the link has to end in .webm") end
+			return
+		end
 
 		--// Fetch Video Data \\--
-		local videoFile = ThemeManager.Folder .. "/themes/" .. string.gsub(domain .. filename, 0, 249) .. ".webm";
-		if not isfile(videoFile) then
-			local success, requestRes = pcall(httprequest, { Url = videoLink, Method = 'GET' })
-			if not (success and typeof(requestRes) == "table" and typeof(requestRes.Body) == "string") then return; end;
+		-- string.sub, not gsub: this caps the file name length, it does not replace anything
+		local videoFile = ThemeManager.Folder .. "/themes/" .. string.sub(domain .. filename, 1, 249) .. ".webm";
 
-			writefile(videoFile, requestRes.Body)
+		if not isfile(videoFile) then
+			ThemeManager:CheckFolderTree()
+
+			local success, requestRes = pcall(httprequest, { Url = videoLink, Method = "GET" })
+
+			if not (success and typeof(requestRes) == "table" and typeof(requestRes.Body) == "string") then
+				if not quiet then VideoWarn("could not download the file") end
+				return
+			end
+
+			if #requestRes.Body < 1024 then
+				if not quiet then VideoWarn("the download was empty, check the link") end
+				return
+			end
+
+			local written = pcall(writefile, videoFile, requestRes.Body)
+
+			if not written then
+				if not quiet then VideoWarn("could not write the file to disk") end
+				return
+			end
 		end
 
 		--// Play Video \\--
-		videoInstance.Video = getassetfunc(videoFile);
-		videoInstance.Visible = true;
-		videoInstance:Play();
+		local ok, asset = pcall(getassetfunc, videoFile)
+
+		if not ok or typeof(asset) ~= "string" then
+			if not quiet then VideoWarn("getcustomasset refused the file") end
+			return
+		end
+
+		local played = pcall(function()
+			videoInstance.Video = asset;
+			videoInstance.Visible = true;
+			videoInstance:Play();
+		end)
+
+		if not played then
+			videoInstance.Visible = false
+			if not quiet then VideoWarn("Roblox refused to play the file") end
+		end
 	end
 
 	function ThemeManager:SetLibrary(library)
@@ -198,7 +260,7 @@ local ThemeManager = {} do
 
 				if field == "VideoLink" then
 					self.Library[field] = value
-					ApplyBackgroundVideo(value)
+					ApplyBackgroundVideo(value, true)
 				elseif field == "MenuFont" then
 					local fontEnum = Enum.Font[tostring(value)]
 					if fontEnum then self.Library.Font = fontEnum end
@@ -333,7 +395,12 @@ local ThemeManager = {} do
 		groupbox:AddLabel('Accent color'):AddColorPicker('AccentColor', { Default = self.Library.AccentColor });
 		groupbox:AddLabel('Outline color'):AddColorPicker('OutlineColor', { Default = self.Library.OutlineColor });
 		groupbox:AddLabel('Font color')	:AddColorPicker('FontColor', { Default = self.Library.FontColor });
-		groupbox:AddInput('VideoLink', { Text = '.webm Video Background (Link)', Default = self.Library.VideoLink });
+		groupbox:AddInput('VideoLink', {
+			Text = '.webm Video Background (Link)',
+			Default = self.Library.VideoLink,
+			Placeholder = 'https://.../file.webm',
+			Finished = true, -- apply on Enter, not on every keystroke
+		});
 
 		local currentFont = 1
 		for i, name in next, FontList do
@@ -444,6 +511,12 @@ local ThemeManager = {} do
 		self.Library.Options.AccentColor:OnChanged(UpdateTheme)
 		self.Library.Options.OutlineColor:OnChanged(UpdateTheme)
 		self.Library.Options.FontColor:OnChanged(UpdateTheme)
+
+		self.Library.Options.VideoLink:OnChanged(function()
+			local link = self.Library.Options.VideoLink.Value
+			self.Library.VideoLink = link
+			ApplyBackgroundVideo(link)
+		end)
 
 		self.Library.Options.MenuFont:OnChanged(function()
 			self.Library:SetFont(self.Library.Options.MenuFont.Value)
