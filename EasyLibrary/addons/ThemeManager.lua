@@ -52,9 +52,10 @@ local ThemeManager = {} do
 	local NonColorFields = { MenuFont = true, MenuTransparency = true }
 
 	local FontList = {
-		"Code", "RobotoMono", "SourceSans", "SourceSansSemibold", "SourceSansBold",
-		"Gotham", "GothamMedium", "GothamBold", "Arial", "ArialBold",
-		"Ubuntu", "Legacy", "Michroma", "Nunito", "Oswald"
+		"Ubuntu", "Gotham", "GothamMedium", "GothamBold",
+		"SourceSans", "SourceSansSemibold", "SourceSansBold",
+		"Code", "RobotoMono", "Arial", "ArialBold",
+		"Michroma", "Nunito", "Oswald"
 	}
 	ThemeManager.Folder = "LinoriaLibSettings"
 	-- if not isfolder(ThemeManager.Folder) then makefolder(ThemeManager.Folder) end
