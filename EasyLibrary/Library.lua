@@ -272,7 +272,6 @@ local Library = {
     Window = { Holder = nil; Tabs = {}; };
 
     -- variables --
-    VideoLink = "";
     
     Toggled = false;
     ToggleKeybind = nil;
@@ -893,6 +892,9 @@ function Library:AddToolTip(InfoStr, DisabledInfoStr, HoverInstance)
         BorderColor3 = "OutlineColor";
     })
 
+    Library:RegisterStroke(Tooltip, "OutlineColor")
+    Library:RegisterCorner(Tooltip, 0.6)
+
     Library:AddToRegistry(Label, {
         TextColor3 = "FontColor",
     })
@@ -1445,6 +1447,10 @@ do
             BorderColor3 = "OutlineColor";
         })
 
+        Library:RegisterStroke(PickInner, "OutlineColor")
+        Library:RegisterCorner(PickInner, 0.6)
+        Library:RegisterCorner(PickOuter, 0.6)
+
         local DisplayLabel = Library:CreateLabel({
             Size = UDim2.new(1, 0, 1, 0);
             TextSize = 13;
@@ -1479,6 +1485,9 @@ do
                 BorderColor3 = "Black";
             })
 
+            KeybindsToggleOuter.BorderSizePixel = 0
+            Library:RegisterCorner(KeybindsToggleOuter, 0.6)
+
             local KeybindsToggleInner = Library:Create("Frame", {
                 BackgroundColor3 = Library.MainColor;
                 BorderColor3 = Library.OutlineColor;
@@ -1492,6 +1501,9 @@ do
                 BackgroundColor3 = "MainColor";
                 BorderColor3 = "OutlineColor";
             })
+
+            Library:RegisterStroke(KeybindsToggleInner, "OutlineColor")
+            Library:RegisterCorner(KeybindsToggleInner, 0.6)
 
             local KeybindsToggleLabel = Library:CreateLabel({
                 BackgroundTransparency = 1;
@@ -1604,6 +1616,10 @@ do
             BorderColor3 = "OutlineColor";
         })
 
+        Library:RegisterStroke(ModeSelectInner, "OutlineColor")
+        Library:RegisterCorner(ModeSelectInner, 0.6)
+        Library:RegisterCorner(ModeSelectOuter, 0.6)
+
         Library:Create("UIListLayout", {
             FillDirection = Enum.FillDirection.Vertical;
             SortOrder = Enum.SortOrder.LayoutOrder;
@@ -1679,6 +1695,9 @@ do
                 BackgroundColor3 = "BackgroundColor";
                 BorderColor3 = "OutlineColor";
             })
+
+            Library:RegisterStroke(UnbindInner, "OutlineColor")
+            Library:RegisterCorner(UnbindInner, 0.6)
 
             local UnbindLabel = Library:CreateLabel({
                 Active = false;
@@ -2291,6 +2310,11 @@ do
 
             Library:AddToRegistry(TransparencyBoxInner, { BorderColor3 = "OutlineColor" })
 
+            Library:RegisterStroke(TransparencyBoxInner, "OutlineColor")
+            Library:RegisterCorner(TransparencyBoxInner, 0.5)
+            TransparencyBoxInner.ClipsDescendants = true
+            Library:RegisterCorner(TransparencyBoxOuter, 0.5)
+
             Library:Create("ImageLabel", {
                 BackgroundTransparency = 1;
                 Size = UDim2.new(1, 0, 1, 0);
@@ -2459,10 +2483,24 @@ do
         ColorPicker.ContextMenu = ContextMenu
 
         Library:AddToRegistry(PickerFrameInner, { BackgroundColor3 = "BackgroundColor"; BorderColor3 = "OutlineColor"; })
+
+        Library:RegisterStroke(PickerFrameInner, "OutlineColor")
+        Library:RegisterCorner(PickerFrameInner, 0.6)
+        Library:RegisterCorner(PickerFrameOuter, 0.6)
         Library:AddToRegistry(Highlight, { BackgroundColor3 = "AccentColor"; })
         Library:AddToRegistry(SatVibMapInner, { BackgroundColor3 = "BackgroundColor"; BorderColor3 = "OutlineColor"; })
 
+        Library:RegisterStroke(SatVibMapInner, "OutlineColor")
+        Library:RegisterCorner(SatVibMapInner, 0.5)
+        SatVibMapInner.ClipsDescendants = true
+        Library:RegisterCorner(SatVibMapOuter, 0.5)
+
         Library:AddToRegistry(HueBoxInner, { BackgroundColor3 = "MainColor"; BorderColor3 = "OutlineColor"; })
+
+        Library:RegisterStroke(HueBoxInner, "OutlineColor")
+        Library:RegisterCorner(HueBoxInner, 0.5)
+        HueBoxInner.ClipsDescendants = true
+        Library:RegisterCorner(HueBoxOuter, 0.5)
         Library:AddToRegistry(RgbBoxBase.Frame, { BackgroundColor3 = "MainColor"; BorderColor3 = "OutlineColor"; })
         Library:AddToRegistry(RgbBox, { TextColor3 = "FontColor", })
         Library:AddToRegistry(HueBox, { TextColor3 = "FontColor", Font = "Font", })
@@ -2758,6 +2796,9 @@ do
             BorderColor3 = "Black";
         })
 
+        DropdownOuter.BorderSizePixel = 0
+        Library:RegisterCorner(DropdownOuter, 0.6)
+
         local DropdownInner = Library:Create("Frame", {
             BackgroundColor3 = Library.MainColor;
             BorderColor3 = Library.OutlineColor;
@@ -2771,6 +2812,9 @@ do
             BackgroundColor3 = "MainColor";
             BorderColor3 = "OutlineColor";
         })
+
+        Library:RegisterStroke(DropdownInner, "OutlineColor")
+        Library:RegisterCorner(DropdownInner, 0.6)
 
         Library:Create("UIGradient", {
             Color = ColorSequence.new({
@@ -2892,6 +2936,10 @@ do
             BorderColor3 = "OutlineColor";
         })
 
+        Library:RegisterStroke(ListInner, "OutlineColor")
+        Library:RegisterCorner(ListInner, 0.6)
+        Library:RegisterCorner(ListOuter, 0.6)
+
         local Scrolling = Library:Create("ScrollingFrame", {
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
@@ -3008,6 +3056,9 @@ do
                     BackgroundColor3 = "MainColor";
                     BorderColor3 = "OutlineColor";
                 })
+
+                Library:RegisterStroke(Button, "OutlineColor")
+                Library:RegisterCorner(Button, 0.6)
 
                 local ButtonLabel = Library:CreateLabel({
                     Active = false;
@@ -3903,6 +3954,10 @@ do
             BorderColor3 = "OutlineColor";
         })
 
+        Library:RegisterStroke(TextBoxInner, "OutlineColor")
+        Library:RegisterCorner(TextBoxInner, 0.6)
+        Library:RegisterCorner(TextBoxOuter, 0.6)
+
         Library:OnHighlight(TextBoxOuter, TextBoxOuter,
             { BorderColor3 = "AccentColor" },
             { BorderColor3 = "Black" }
@@ -4137,6 +4192,9 @@ do
             BorderColor3 = "Black";
         })
 
+        ToggleOuter.BorderSizePixel = 0
+        Library:RegisterCorner(ToggleOuter, 0.5)
+
         local ToggleInner = Library:Create("Frame", {
             BackgroundColor3 = Library.MainColor;
             BorderColor3 = Library.OutlineColor;
@@ -4150,6 +4208,9 @@ do
             BackgroundColor3 = "MainColor";
             BorderColor3 = "OutlineColor";
         })
+
+        Library:RegisterStroke(ToggleInner, "OutlineColor")
+        Library:RegisterCorner(ToggleInner, 0.5)
 
         local ToggleLabel = Library:CreateLabel({
             Size = UDim2.new(1, -19, 0, 11); -- size of toggle box (13) + size offset of previous layout (6)
@@ -4393,6 +4454,9 @@ do
             BorderColor3 = "Black";
         })
 
+        SliderOuter.BorderSizePixel = 0
+        Library:RegisterCorner(SliderOuter, 0.5)
+
         local SliderInner = Library:Create("Frame", {
             BackgroundColor3 = Library.MainColor;
             BorderColor3 = Library.OutlineColor;
@@ -4407,6 +4471,9 @@ do
             BorderColor3 = "OutlineColor";
         })
 
+        Library:RegisterStroke(SliderInner, "OutlineColor")
+        Library:RegisterCorner(SliderInner, 0.5)
+
         local Fill = Library:Create("Frame", {
             BackgroundColor3 = Library.AccentColor;
             BorderColor3 = Library.AccentColorDark;
@@ -4419,6 +4486,9 @@ do
             BackgroundColor3 = "AccentColor";
             BorderColor3 = "AccentColorDark";
         })
+
+        Fill.BorderSizePixel = 0
+        Library:RegisterCorner(Fill, 0.5)
 
         local HideBorderRight = Library:Create("Frame", {
             BackgroundColor3 = Library.AccentColor;
@@ -4772,6 +4842,9 @@ do
             BorderColor3 = "Black";
         })
 
+        DropdownOuter.BorderSizePixel = 0
+        Library:RegisterCorner(DropdownOuter, 0.6)
+
         local DropdownInner = Library:Create("Frame", {
             BackgroundColor3 = Library.MainColor;
             BorderColor3 = Library.OutlineColor;
@@ -4785,6 +4858,9 @@ do
             BackgroundColor3 = "MainColor";
             BorderColor3 = "OutlineColor";
         })
+
+        Library:RegisterStroke(DropdownInner, "OutlineColor")
+        Library:RegisterCorner(DropdownInner, 0.6)
 
         Library:Create("UIGradient", {
             Color = ColorSequence.new({
@@ -4903,6 +4979,10 @@ do
             BorderColor3 = "OutlineColor";
         })
 
+        Library:RegisterStroke(ListInner, "OutlineColor")
+        Library:RegisterCorner(ListInner, 0.6)
+        Library:RegisterCorner(ListOuter, 0.6)
+
         local Scrolling = Library:Create("ScrollingFrame", {
             BackgroundTransparency = 1;
             BorderSizePixel = 0;
@@ -5013,6 +5093,9 @@ do
                     BackgroundColor3 = "MainColor";
                     BorderColor3 = "OutlineColor";
                 })
+
+                Library:RegisterStroke(Button, "OutlineColor")
+                Library:RegisterCorner(Button, 0.6)
 
                 local ButtonLabel = Library:CreateLabel({
                     Active = false;
@@ -6254,6 +6337,10 @@ do
         BorderColor3 = "OutlineColor";
     }, true)
 
+    Library:RegisterStroke(KeybindInner, "OutlineColor")
+    Library:RegisterCorner(KeybindInner, 0.8)
+    Library:RegisterCorner(KeybindOuter, 0.8)
+
     local ColorFrame = Library:Create("Frame", {
         BackgroundColor3 = Library.AccentColor;
         BorderSizePixel = 0;
@@ -6324,6 +6411,10 @@ do
     Library:AddToRegistry(WatermarkInner, {
         BorderColor3 = "AccentColor";
     })
+
+    Library:RegisterStroke(WatermarkInner, "AccentColor")
+    Library:RegisterCorner(WatermarkInner, 0.8)
+    Library:RegisterCorner(WatermarkOuter, 0.8)
 
     local InnerFrame = Library:Create("Frame", {
         BackgroundColor3 = Color3.new(1, 1, 1);
@@ -6475,6 +6566,10 @@ do
             BackgroundColor3 = "MainColor";
             BorderColor3 = "OutlineColor";
         }, true)
+
+        Library:RegisterStroke(NotifyInner, "OutlineColor")
+        Library:RegisterCorner(NotifyInner, 0.8)
+        Library:RegisterCorner(NotifyOuter, 0.8)
 
         local InnerFrame = Library:Create("Frame", {
             BackgroundColor3 = Color3.new(1, 1, 1);
@@ -7010,20 +7105,6 @@ function Library:CreateWindow(...)
     Library:RegisterCorner(TabContainer)
     Library:RegisterStroke(TabContainer, "OutlineColor")
 
-    local InnerVideoBackground = Library:Create("VideoFrame", {
-        BackgroundColor3 = Library.MainColor;
-        BorderMode = Enum.BorderMode.Inset;
-        BorderSizePixel = 0;
-        Position = UDim2.new(0, 1, 0, 1);
-        Size = UDim2.new(1, -2, 1, -2);
-        ZIndex = 2;
-        Visible = false;
-        Volume = 0;
-        Looped = true;
-        Parent = TabContainer;
-    })
-    Library.InnerVideoBackground = InnerVideoBackground
-
     local BackgroundImage = Library:Create("ImageLabel", {
         Image = "";
         Position = UDim2.fromScale(0, 0);
@@ -7127,6 +7208,9 @@ function Library:CreateWindow(...)
             BackgroundColor3 = "MainColor",
             BorderColor3 = "AccentColor",
         })
+
+        Library:RegisterStroke(DialogInner, "AccentColor")
+        Library:RegisterCorner(DialogInner, 1.0)
 
         local InnerContainer = Library:Create("Frame", {
             BackgroundTransparency = 1,
@@ -7412,6 +7496,9 @@ function Library:CreateWindow(...)
             })
             Library:AddToRegistry(ButtonContainer, { BorderColor3 = "Black" })
 
+            ButtonContainer.BorderSizePixel = 0
+            Library:RegisterCorner(ButtonContainer, 0.6)
+
             local TextBtn = Library:Create("TextButton", {
                 BackgroundColor3 = BtnInnerColor,
                 BorderColor3 = BtnBorderColor,
@@ -7426,10 +7513,19 @@ function Library:CreateWindow(...)
 
             if Variant == "Primary" then
                 Library:AddToRegistry(TextBtn, { BackgroundColor3 = "MainColor", BorderColor3 = "AccentColor" })
+
+                Library:RegisterStroke(TextBtn, "AccentColor")
+                Library:RegisterCorner(TextBtn, 0.6)
             elseif Variant == "Secondary" then
                 Library:AddToRegistry(TextBtn, { BackgroundColor3 = "BackgroundColor", BorderColor3 = "OutlineColor" })
+
+                Library:RegisterStroke(TextBtn, "OutlineColor")
+                Library:RegisterCorner(TextBtn, 0.6)
             elseif Variant == "Ghost" then
                 Library:AddToRegistry(TextBtn, { BackgroundColor3 = "MainColor", BorderColor3 = "MainColor" })
+
+                Library:RegisterStroke(TextBtn, "MainColor")
+                Library:RegisterCorner(TextBtn, 0.6)
             end
 
             Library:Create("UIGradient", {
@@ -8954,6 +9050,10 @@ end
         Library:AddToRegistry(ToggleUIInner, {
             BorderColor3 = "AccentColor";
         })
+
+        Library:RegisterStroke(ToggleUIInner, "AccentColor")
+        Library:RegisterCorner(ToggleUIInner, 0.6)
+        Library:RegisterCorner(ToggleUIOuter, 0.6)
     
         local ToggleUIInnerFrame = Library:Create("Frame", {
             BackgroundColor3 = Color3.new(1, 1, 1);
@@ -9025,6 +9125,10 @@ end
         Library:AddToRegistry(LockUIInner, {
             BorderColor3 = "AccentColor";
         })
+
+        Library:RegisterStroke(LockUIInner, "AccentColor")
+        Library:RegisterCorner(LockUIInner, 0.6)
+        Library:RegisterCorner(LockUIOuter, 0.6)
     
         local LockUIInnerFrame = Library:Create("Frame", {
             BackgroundColor3 = Color3.new(1, 1, 1);
