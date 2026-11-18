@@ -73,6 +73,12 @@ local KeyUI = {} do
             BorderColor3 = "AccentColor";
         })
 
+        if Library.RegisterCorner then
+            Library:RegisterCorner(Outer)
+            Library:RegisterCorner(Inner)
+            Library:RegisterStroke(Inner, "AccentColor")
+        end
+
         Library:CreateLabel({
             BackgroundTransparency = 1;
             Position = UDim2.new(0, 10, 0, 9);
@@ -119,6 +125,11 @@ local KeyUI = {} do
             BackgroundColor3 = "MainColor";
             BorderColor3 = "OutlineColor";
         })
+
+        if Library.RegisterCorner then
+            Library:RegisterCorner(BoxOuter, 0.6)
+            Library:RegisterCorner(BoxInner, 0.6)
+        end
 
         Library:OnHighlight(BoxOuter, BoxOuter,
             { BorderColor3 = "AccentColor" },
@@ -213,6 +224,11 @@ local KeyUI = {} do
                 BackgroundColor3 = "BackgroundColor";
                 BorderColor3 = "OutlineColor";
             })
+
+            if Library.RegisterCorner then
+                Library:RegisterCorner(ButtonOuter, 0.6)
+                Library:RegisterCorner(ButtonInner, 0.6)
+            end
 
             Library:CreateLabel({
                 BackgroundTransparency = 1;
