@@ -6147,34 +6147,28 @@ do
         return Viewport
     end
 
-    --// ESP layout panel: drag a label to any side of the rig and it sits there \\--
+    --// ESP preview: draws the real ESP on a rig; drag any piece to another side \\--
     function BaseGroupboxFuncs:AddESPPanel(Idx, Info)
         Info = Library:Validate(Info or {}, {
-            Text = "ESP layout",
-            Height = 300,
-            Features = { "Name", "Health", "Distance", "Weapon", "Tool" },
+            Text = "ESP preview",
+            Height = 340,
+            Features = { "Name", "Health", "Distance", "Weapon" },
             Default = {},
-            Model = nil,
+            Samples = {},
+            Bars = { Health = true },
+            DefaultSides = { Name = "Top", Health = "Left" },
             UseLocalCharacter = true,
+            BoxStyle = "Full",
+            Tracer = false,
+            TracerOrigin = "Bottom",
+            TextSize = 12,
+            Chams = { Enabled = false, Color = Color3.fromRGB(255, 70, 70), Transparency = 0.15 },
             Visible = true,
             Callback = function() end,
         })
 
-        -- the rig sits in the middle; the eight zones tile the rest of the
-        -- preview edge to edge, so a drop can never land in a dead spot
-        local BoxX, BoxW = 0.34, 0.32
-        local BoxY, BoxH = 0.20, 0.60
-
-        local Zones = {
-            TopLeft     = { 0, 0, BoxX, BoxY, Enum.HorizontalAlignment.Left,   Enum.VerticalAlignment.Bottom },
-            Top         = { BoxX, 0, BoxW, BoxY, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Bottom },
-            TopRight    = { BoxX + BoxW, 0, 1 - BoxX - BoxW, BoxY, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Bottom },
-            Left        = { 0, BoxY, BoxX, BoxH, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center },
-            Right       = { BoxX + BoxW, BoxY, 1 - BoxX - BoxW, BoxH, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center },
-            BottomLeft  = { 0, BoxY + BoxH, BoxX, 1 - BoxY - BoxH, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Top },
-            Bottom      = { BoxX, BoxY + BoxH, BoxW, 1 - BoxY - BoxH, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top },
-            BottomRight = { BoxX + BoxW, BoxY + BoxH, 1 - BoxX - BoxW, 1 - BoxY - BoxH, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Top },
-        }
+        local Sides = { Top = true, Bottom = true, Left = true, Right = true }
+        local Legacy = { TopLeft = "Top", TopRight = "Top", BottomLeft = "Bottom", BottomRight = "Bottom" }
 
         local Panel = {
             Value = {},
@@ -6209,33 +6203,161 @@ do
 
         --// Preview \\--
         local Preview = Library:Create("Frame", {
-            BackgroundColor3 = Library.MainColor,
+            BackgroundColor3 = Library.BackgroundColor,
             BorderColor3 = Library.OutlineColor,
             ClipsDescendants = true,
-            Position = UDim2.new(0, 0, 0, 18),
-            Size = UDim2.new(1, 0, 1, -48),
+            Position = UDim2.new(0, 0, 0, 20),
+            Size = UDim2.new(1, 0, 1, -50),
             ZIndex = 6,
             Parent = Holder,
         })
 
         Library:AddToRegistry(Preview, {
-            BackgroundColor3 = "MainColor";
+            BackgroundColor3 = "BackgroundColor";
             BorderColor3 = "OutlineColor";
         })
 
         Library:RegisterStroke(Preview, "OutlineColor")
         Library:RegisterCorner(Preview, 0.6)
 
-        --// Rig, inside an ESP box \\--
+        -- the ESP box; sized from the model so it hugs it like the real thing
         local RigBox = Library:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
             BackgroundTransparency = 1,
-            Position = UDim2.fromScale(BoxX, BoxY),
-            Size = UDim2.fromScale(BoxW, BoxH),
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.fromOffset(60, 120),
+            ZIndex = 8,
+            Parent = Preview,
+        })
+
+        local CustomColours = {} -- Box, Tracer, or a feature name
+
+        local function BoxColour()
+            return CustomColours.Box or Library.AccentColor
+        end
+
+        local BoxStroke = Library:RegisterStroke(RigBox, "AccentColor")
+        Library.RegistryMap[BoxStroke].Properties.Color = BoxColour
+
+        -- the black edge under the coloured line that every ESP box has
+        local BoxShadow = Library:Create("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+            ZIndex = 7,
+            Parent = RigBox,
+        })
+
+        local ShadowStroke = Library:Create("UIStroke", {
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+            Color = Color3.new(0, 0, 0),
+            Thickness = 3,
+            Transparency = 0.15,
+            Parent = BoxShadow,
+        })
+
+        -- corner style: eight short strokes instead of a full rectangle
+        local Corners = {}
+
+        local function CornerPiece(Anchor, Position, Size)
+            local Piece = Library:Create("Frame", {
+                AnchorPoint = Anchor,
+                BackgroundColor3 = BoxColour(),
+                BorderSizePixel = 0,
+                Position = Position,
+                Size = Size,
+                Visible = false,
+                ZIndex = 10,
+                Parent = RigBox,
+            })
+
+            Library:AddToRegistry(Piece, { BackgroundColor3 = BoxColour; })
+
+            Library:Create("UIStroke", {
+                ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                Color = Color3.new(0, 0, 0),
+                Thickness = 1,
+                Transparency = 0.15,
+                Parent = Piece,
+            })
+
+            table.insert(Corners, Piece)
+        end
+
+        for _, Corner in next, {
+            { Vector2.new(0, 0), UDim2.new(0, 0, 0, 0) },
+            { Vector2.new(1, 0), UDim2.new(1, 0, 0, 0) },
+            { Vector2.new(0, 1), UDim2.new(0, 0, 1, 0) },
+            { Vector2.new(1, 1), UDim2.new(1, 0, 1, 0) },
+        } do
+            CornerPiece(Corner[1], Corner[2], UDim2.new(0.3, 0, 0, 1))
+            CornerPiece(Corner[1], Corner[2], UDim2.new(0, 1, 0.22, 0))
+        end
+
+        function Panel:SetBoxStyle(Style)
+            Style = (Style == "Corner" or Style == "None") and Style or "Full"
+
+            BoxStroke.Enabled = Style == "Full"
+            ShadowStroke.Enabled = Style == "Full"
+
+            for _, Piece in next, Corners do
+                Piece.Visible = Style == "Corner"
+            end
+
+            Panel.BoxStyle = Style
+        end
+
+        --// Tracer: a line from the edge of the screen to the box \\--
+        local TracerOn, TracerOrigin = false, "Bottom"
+
+        local Tracer = Library:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundColor3 = BoxColour(),
+            BorderSizePixel = 0,
+            Size = UDim2.fromOffset(0, 1),
+            Visible = false,
             ZIndex = 7,
             Parent = Preview,
         })
 
-        Library:RegisterStroke(RigBox, "AccentColor")
+        Library:AddToRegistry(Tracer, {
+            BackgroundColor3 = function() return CustomColours.Tracer or BoxColour() end;
+        })
+
+        local function UpdateTracer()
+            if not TracerOn then
+                Tracer.Visible = false
+                return
+            end
+
+            local PA, PS = Preview.AbsolutePosition, Preview.AbsoluteSize
+            local BA, BS = RigBox.AbsolutePosition, RigBox.AbsoluteSize
+            if PS.X <= 0 or BS.X <= 0 then return end
+
+            local FromTop = TracerOrigin == "Top"
+            local From = Vector2.new(PA.X + PS.X / 2, FromTop and PA.Y or PA.Y + PS.Y)
+            local To = Vector2.new(BA.X + BS.X / 2, FromTop and BA.Y or BA.Y + BS.Y)
+
+            local Delta = To - From
+            local Mid = (From + To) / 2 - PA
+
+            Tracer.Position = UDim2.fromOffset(Mid.X, Mid.Y)
+            Tracer.Size = UDim2.fromOffset(math.max(Delta.Magnitude, 1), 1)
+            Tracer.Rotation = math.deg(math.atan2(Delta.Y, Delta.X))
+            Tracer.Visible = true
+        end
+
+        RigBox:GetPropertyChangedSignal("AbsolutePosition"):Connect(UpdateTracer)
+        RigBox:GetPropertyChangedSignal("AbsoluteSize"):Connect(UpdateTracer)
+
+        function Panel:SetTracer(Enabled, Origin)
+            TracerOn = Enabled and true or false
+
+            if Origin == "Top" or Origin == "Bottom" then
+                TracerOrigin = Origin
+            end
+
+            UpdateTracer()
+        end
 
         local Viewport = Library:Create("ViewportFrame", {
             BackgroundTransparency = 1,
@@ -6244,19 +6366,101 @@ do
             Parent = RigBox,
         })
 
-        --// Model handling \\--
-        local Camera = Library:Create("Camera", { FieldOfView = 50, Parent = Viewport })
+        local Camera = Library:Create("Camera", { FieldOfView = 40, Parent = Viewport })
         Viewport.CurrentCamera = Camera
 
         local WorldModel = Library:Create("WorldModel", { Parent = Viewport })
         local CurrentModel
 
-        -- a viewport carries no light of its own; without this everything in
-        -- it renders black
-        Viewport.Ambient = Color3.fromRGB(190, 190, 190)
+        -- a viewport carries no light of its own; without this it renders black
+        Viewport.Ambient = Color3.fromRGB(185, 185, 185)
         Viewport.LightColor = Color3.fromRGB(255, 255, 255)
-        Viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+        Viewport.LightDirection = Vector3.new(-0.3, -1, -0.5)
 
+        --// Side highlights, shown while something is dragged over that side \\--
+        local Bands = {}
+
+        local function Band(Name, Anchor, Position, Size, Rotation, Near)
+            local Frame = Library:Create("Frame", {
+                AnchorPoint = Anchor,
+                BackgroundColor3 = Library.AccentColor,
+                BackgroundTransparency = 1,
+                BorderSizePixel = 0,
+                Position = Position,
+                Size = Size,
+                ZIndex = 9,
+                Parent = RigBox,
+            })
+
+            Library:AddToRegistry(Frame, { BackgroundColor3 = "AccentColor"; })
+
+            Library:Create("UIGradient", {
+                Rotation = Rotation,
+                Transparency = Near == 1
+                    and NumberSequence.new({ NumberSequenceKeypoint.new(0, 1), NumberSequenceKeypoint.new(1, 0) })
+                    or NumberSequence.new({ NumberSequenceKeypoint.new(0, 0), NumberSequenceKeypoint.new(1, 1) }),
+                Parent = Frame,
+            })
+
+            Bands[Name] = Frame
+        end
+
+        Band("Top",    Vector2.new(0.5, 1), UDim2.new(0.5, 0, 0, -2), UDim2.new(1, 30, 0, 56), 90, 1)
+        Band("Bottom", Vector2.new(0.5, 0), UDim2.new(0.5, 0, 1, 2),  UDim2.new(1, 30, 0, 56), 90, 0)
+        Band("Left",   Vector2.new(1, 0.5), UDim2.new(0, -2, 0.5, 0), UDim2.new(0, 70, 1, 30), 0, 1)
+        Band("Right",  Vector2.new(0, 0.5), UDim2.new(1, 2, 0.5, 0),  UDim2.new(0, 70, 1, 30), 0, 0)
+
+        --// Stacks: where the pieces sit on each side of the box \\--
+        local Stacks = {}
+
+        local function Stack(Name, Props, Fill, HAlign, VAlign, Padding)
+            Props.BackgroundTransparency = 1
+            Props.ZIndex = 11
+            Props.Parent = RigBox
+
+            local Frame = Library:Create("Frame", Props)
+
+            Library:Create("UIListLayout", {
+                Padding = UDim.new(0, Padding),
+                FillDirection = Fill,
+                HorizontalAlignment = HAlign,
+                VerticalAlignment = VAlign,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = Frame,
+            })
+
+            Stacks[Name] = Frame
+        end
+
+        Stack("Top", {
+            AnchorPoint = Vector2.new(0.5, 1),
+            Position = UDim2.new(0.5, 0, 0, -4),
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+        }, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Bottom, 1)
+
+        Stack("Bottom", {
+            AnchorPoint = Vector2.new(0.5, 0),
+            Position = UDim2.new(0.5, 0, 1, 4),
+            Size = UDim2.new(1, 0, 0, 0),
+            AutomaticSize = Enum.AutomaticSize.Y,
+        }, Enum.FillDirection.Vertical, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top, 1)
+
+        Stack("Left", {
+            AnchorPoint = Vector2.new(1, 0),
+            Position = UDim2.new(0, -4, 0, 0),
+            Size = UDim2.new(0, 0, 1, 0),
+            AutomaticSize = Enum.AutomaticSize.X,
+        }, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center, 3)
+
+        Stack("Right", {
+            AnchorPoint = Vector2.new(0, 0),
+            Position = UDim2.new(1, 4, 0, 0),
+            Size = UDim2.new(0, 0, 1, 0),
+            AutomaticSize = Enum.AutomaticSize.X,
+        }, Enum.FillDirection.Horizontal, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center, 3)
+
+        --// Model and framing \\--
         local function BuildDummy()
             local Dummy = Instance.new("Model")
             Dummy.Name = "Dummy"
@@ -6267,44 +6471,151 @@ do
                 Block.Anchored = true
                 Block.CanCollide = false
                 Block.Material = Enum.Material.SmoothPlastic
-                Block.Color = Colour or Color3.fromRGB(170, 170, 175)
+                Block.Color = Colour or Color3.fromRGB(163, 162, 165)
                 Block.Size = SizeV
                 Block.CFrame = CFrame.new(PositionV)
                 Block.Parent = Dummy
                 return Block
             end
 
-            local Torso = Part("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0))
-            Part("Head", Vector3.new(1.6, 1.2, 1.2), Vector3.new(0, 4.6, 0), Color3.fromRGB(205, 200, 160))
-            Part("LeftArm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 3, 0))
-            Part("RightArm", Vector3.new(1, 2, 1), Vector3.new(1.5, 3, 0))
-            Part("LeftLeg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0))
-            Part("RightLeg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0))
+            local Torso = Part("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0), Color3.fromRGB(13, 105, 172))
+            Part("Head", Vector3.new(1.2, 1.2, 1.2), Vector3.new(0, 4.6, 0), Color3.fromRGB(245, 205, 48))
+            Part("LeftArm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 3, 0), Color3.fromRGB(245, 205, 48))
+            Part("RightArm", Vector3.new(1, 2, 1), Vector3.new(1.5, 3, 0), Color3.fromRGB(245, 205, 48))
+            Part("LeftLeg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0), Color3.fromRGB(75, 151, 75))
+            Part("RightLeg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0), Color3.fromRGB(75, 151, 75))
 
             Dummy.PrimaryPart = Torso
             return Dummy
         end
 
-        local function Focus()
+        --// Chams: tint the model so the preview matches what the user picked \\--
+        local Chams = {
+            Enabled = false,
+            Color = Color3.fromRGB(255, 70, 70),
+            Transparency = 0.15,
+        }
+
+        local Stash = {}
+
+        local function ApplyChams()
             if not CurrentModel then return end
 
-            local Ok, Size, Pivot = pcall(function()
-                return CurrentModel:GetExtentsSize(), CurrentModel:GetPivot()
-            end)
+            local Descendants = CurrentModel:GetDescendants()
 
-            if not Ok or typeof(Size) ~= "Vector3" or Size.Y <= 0 then return end
+            for _, Child in next, Descendants do
+                pcall(function()
+                    if Child:IsA("BasePart") then
+                        if Child.Name == "HumanoidRootPart" then return end
 
-            local Box = RigBox.AbsoluteSize
-            local Aspect = (Box.X > 0 and Box.Y > 0) and (Box.X / Box.Y) or 0.55
+                        if not Stash[Child] then
+                            Stash[Child] = {
+                                Color = Child.Color,
+                                Material = Child.Material,
+                                Transparency = Child.Transparency,
+                                TextureID = Child:IsA("MeshPart") and Child.TextureID or nil,
+                            }
+                        end
+
+                        local Saved = Stash[Child]
+
+                        if Chams.Enabled then
+                            Child.Color = Chams.Color
+                            Child.Material = Enum.Material.SmoothPlastic
+                            Child.Transparency = Chams.Transparency
+
+                            if Child:IsA("MeshPart") then Child.TextureID = "" end
+                        else
+                            Child.Color = Saved.Color
+                            Child.Material = Saved.Material
+                            Child.Transparency = Saved.Transparency
+
+                            if Child:IsA("MeshPart") and Saved.TextureID then
+                                Child.TextureID = Saved.TextureID
+                            end
+                        end
+                    elseif Child:IsA("Decal") or Child:IsA("Texture") then
+                        if not Stash[Child] then Stash[Child] = { Transparency = Child.Transparency } end
+                        Child.Transparency = Chams.Enabled and 1 or Stash[Child].Transparency
+                    elseif Child:IsA("SpecialMesh") then
+                        if not Stash[Child] then Stash[Child] = { TextureId = Child.TextureId } end
+                        Child.TextureId = Chams.Enabled and "" or Stash[Child].TextureId
+                    end
+                end)
+            end
+
+            -- clothing and surface textures sit over the part colour, so they
+            -- come off while chams are on and go back afterwards
+            if Chams.Enabled then
+                for _, Child in next, Descendants do
+                    if Child:IsA("Clothing") or Child:IsA("ShirtGraphic") or Child:IsA("SurfaceAppearance") then
+                        Stash[Child] = { Parent = Child.Parent }
+                        pcall(function() Child.Parent = nil end)
+                    end
+                end
+            else
+                for Child, Saved in next, Stash do
+                    if Saved.Parent and Child.Parent == nil then
+                        pcall(function() Child.Parent = Saved.Parent end)
+                    end
+                end
+            end
+        end
+
+        function Panel:SetChams(Enabled, Colour, Transparency)
+            Chams.Enabled = Enabled and true or false
+
+            if typeof(Colour) == "Color3" then
+                Chams.Color = Colour
+            end
+
+            if tonumber(Transparency) then
+                Chams.Transparency = math.clamp(tonumber(Transparency), 0, 0.95)
+            end
+
+            ApplyChams()
+        end
+
+        -- Sizes the box to the model's proportions, then puts the camera
+        -- exactly far enough away that the model fills it.
+        local function Layout()
+            local Area = Preview.AbsoluteSize
+            if Area.X <= 0 or Area.Y <= 0 then return end
+
+            local BoxCFrame, Size = nil, nil
+
+            if CurrentModel then
+                local Ok, A, B = pcall(function()
+                    return CurrentModel:GetBoundingBox()
+                end)
+
+                if Ok and typeof(B) == "Vector3" and B.Y > 0 then
+                    BoxCFrame, Size = A, B
+                end
+            end
+
+            local Aspect = Size and math.clamp(Size.X / Size.Y, 0.4, 0.85) or 0.55
+
+            local H = math.floor(Area.Y * 0.6)
+            local W = math.floor(H * Aspect)
+
+            -- keep room either side for text on the left and right
+            if W > Area.X * 0.4 then
+                W = math.floor(Area.X * 0.4)
+            end
+
+            RigBox.Size = UDim2.fromOffset(W, H)
+
+            if not BoxCFrame then return end
 
             local Half = math.tan(math.rad(Camera.FieldOfView) / 2)
-            local NeedY = (Size.Y / 2) / Half
-            local NeedX = (math.max(Size.X, Size.Z) / 2) / (Half * Aspect)
+            local FitHeight = (Size.Y / 2) / Half
+            local FitWidth = (Size.X / 2) / (Half * (W / H))
 
-            Camera.CFrame = CFrame.new(
-                Pivot.Position + Vector3.new(0, 0, math.max(NeedX, NeedY) * 1.1),
-                Pivot.Position
-            )
+            local Distance = math.max(FitHeight, FitWidth) * 1.04 + Size.Z / 2
+            local Centre = BoxCFrame.Position
+
+            Camera.CFrame = CFrame.lookAt(Centre + BoxCFrame.LookVector * Distance, Centre)
         end
 
         local function Show(Model)
@@ -6329,12 +6640,16 @@ do
 
             for _, Child in next, Clone:GetDescendants() do
                 if Child:IsA("BaseScript") or Child:IsA("Sound") or Child:IsA("ParticleEmitter")
-                    or Child:IsA("Beam") or Child:IsA("Trail") then
+                    or Child:IsA("Beam") or Child:IsA("Trail") or Child:IsA("BillboardGui") then
                     pcall(function() Child:Destroy() end)
                 elseif Child:IsA("BasePart") then
                     Child.Anchored = true
                     Child.CanCollide = false
                     Child.CastShadow = false
+
+                    if Child.Name == "HumanoidRootPart" then
+                        Child.Transparency = 1
+                    end
                 end
             end
 
@@ -6346,8 +6661,11 @@ do
             Clone.Parent = WorldModel
             CurrentModel = Clone
 
-            Focus()
-            task.defer(Focus) -- AbsoluteSize is still zero on the first frame
+            Stash = {}
+            if Chams.Enabled then ApplyChams() end
+
+            Layout()
+            task.defer(Layout)
 
             return true
         end
@@ -6375,49 +6693,40 @@ do
         end
 
         function Panel:Refocus()
-            Focus()
+            Layout()
         end
 
         Panel.Viewport = Viewport
-        RigBox:GetPropertyChangedSignal("AbsoluteSize"):Connect(Focus)
+        Preview:GetPropertyChangedSignal("AbsoluteSize"):Connect(Layout)
 
-        --// Drop zones \\--
-        local ZoneFrames = {}
+        --// What each piece shows \\--
+        local function SampleFor(Name)
+            local Sample = Info.Samples[Name]
+            if Sample ~= nil then return Sample end
 
-        for Name, Spec in next, Zones do
-            local Zone = Library:Create("Frame", {
-                BackgroundColor3 = Library.AccentColor,
-                BackgroundTransparency = 1,
-                BorderSizePixel = 0,
-                Position = UDim2.fromScale(Spec[1], Spec[2]),
-                Size = UDim2.fromScale(Spec[3], Spec[4]),
-                ZIndex = 7,
-                Parent = Preview,
-            })
+            if Info.Bars[Name] then return Name == "Health" and 0.72 or 0.5 end
+            if Name == "Name" then return (LocalPlayer and LocalPlayer.DisplayName) or "Player" end
+            if Name == "Distance" then return "24m" end
+            if Name == "Weapon" then return "AK-47" end
+            if Name == "Tool" then return "Medkit" end
+            if Name == "Team" then return "Red team" end
 
-            Library:AddToRegistry(Zone, { BackgroundColor3 = "AccentColor"; })
-
-            Library:Create("UIListLayout", {
-                Padding = UDim.new(0, 1),
-                FillDirection = Enum.FillDirection.Vertical,
-                HorizontalAlignment = Spec[5],
-                VerticalAlignment = Spec[6],
-                SortOrder = Enum.SortOrder.LayoutOrder,
-                Parent = Zone,
-            })
-
-            Library:Create("UIPadding", {
-                PaddingLeft = UDim.new(0, 3),
-                PaddingRight = UDim.new(0, 3),
-                PaddingTop = UDim.new(0, 2),
-                PaddingBottom = UDim.new(0, 2),
-                Parent = Zone,
-            })
-
-            ZoneFrames[Name] = Zone
+            return Name
         end
 
-        --// Tray \\--
+        local function BarColour(Name, Value)
+            if CustomColours[Name] then
+                return CustomColours[Name]
+            end
+
+            if Name == "Health" then
+                return Color3.fromHSV(math.clamp(Value, 0, 1) * 0.33, 0.85, 0.95)
+            end
+
+            return Library.AccentColor
+        end
+
+        --// Tray: the pieces that are switched off \\--
         local Tray = Library:Create("Frame", {
             BackgroundTransparency = 1,
             Position = UDim2.new(0, 0, 1, -26),
@@ -6435,6 +6744,24 @@ do
             Parent = Tray,
         })
 
+        local TrayHint = Library:Create("TextLabel", {
+            AnchorPoint = Vector2.new(1, 0.5),
+            BackgroundTransparency = 1,
+            Font = Library.Font,
+            Position = UDim2.new(1, 0, 1, -14),
+            Size = UDim2.new(1, 0, 0, 24),
+            Text = "drag a piece out of the box to hide it",
+            TextColor3 = Library.FontColor,
+            TextSize = 12,
+            TextTransparency = 0.55,
+            TextXAlignment = Enum.TextXAlignment.Right,
+            ZIndex = 6,
+            Parent = Holder,
+        })
+
+        Library:AddToRegistry(TrayHint, { TextColor3 = "FontColor"; Font = "Font"; })
+
+        --// Drag layer and ghost \\--
         local DragLayer = Library:Create("Frame", {
             BackgroundTransparency = 1,
             Size = UDim2.fromScale(1, 1),
@@ -6442,11 +6769,51 @@ do
             Parent = Holder,
         })
 
-        --// Chips \\--
-        local Chips = {}
-        local Hovered = nil
+        local Ghost = Library:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundColor3 = Library.MainColor,
+            BorderSizePixel = 0,
+            Size = UDim2.new(0, 0, 0, 20),
+            Visible = false,
+            ZIndex = 41,
+            Parent = DragLayer,
+        })
 
-        local function Changed()
+        Library:AddToRegistry(Ghost, { BackgroundColor3 = "MainColor"; })
+        Library:RegisterStroke(Ghost, "AccentColor")
+        Library:RegisterCorner(Ghost, 0.6)
+
+        Library:Create("UIPadding", {
+            PaddingLeft = UDim.new(0, 8),
+            PaddingRight = UDim.new(0, 8),
+            Parent = Ghost,
+        })
+
+        local GhostLabel = Library:Create("TextLabel", {
+            AutomaticSize = Enum.AutomaticSize.X,
+            BackgroundTransparency = 1,
+            Font = Library.Font,
+            Size = UDim2.new(0, 0, 1, 0),
+            Text = "",
+            TextColor3 = Library.FontColor,
+            TextSize = 13,
+            ZIndex = 42,
+            Parent = Ghost,
+        })
+
+        Library:AddToRegistry(GhostLabel, { TextColor3 = "FontColor"; Font = "Font"; })
+
+        --// Pieces \\--
+        local Items = {}
+        local Order = {}
+        local TextSize = math.clamp(tonumber(Info.TextSize) or 12, 8, 24)
+
+        for Index, Name in next, Panel.Features do
+            Order[Name] = Index
+        end
+
+        local function Fire()
             Library:SafeCallback(Info.Callback, Panel.Value)
 
             for _, Callback in next, Panel.Callbacks do
@@ -6454,206 +6821,399 @@ do
             end
         end
 
-        local function Highlight(ZoneName)
-            if Hovered == ZoneName then return end
+        local function RefreshHint()
+            local AnyHidden = false
 
-            if Hovered and ZoneFrames[Hovered] then
-                Library:Animate(ZoneFrames[Hovered], { BackgroundTransparency = 1 })
-            end
-
-            Hovered = ZoneName
-
-            if Hovered and ZoneFrames[Hovered] then
-                Library:Animate(ZoneFrames[Hovered], { BackgroundTransparency = 0.82 })
-            end
-        end
-
-        local function ZoneUnderMouse()
-            if not Library:MouseIsOverFrame(Preview) then return nil end
-
-            for ZoneName, Zone in next, ZoneFrames do
-                if Library:MouseIsOverFrame(Zone) then
-                    return ZoneName
+            for _, Item in next, Items do
+                if Item.Pill.Visible then
+                    AnyHidden = true
+                    break
                 end
             end
 
-            return nil
+            TrayHint.Visible = not AnyHidden
         end
 
-        -- a docked label should read like real ESP text, not like a button
-        local function Dress(Chip, Docked)
-            Chip.Frame.BackgroundTransparency = Docked and 1 or 0
-            Chip.Stroke.Transparency = Docked and 1 or 0
-            Chip.Label.TextSize = Docked and 12 or 13
+        -- bars turn to fit the side they are on
+        local function Orient(Item, Side)
+            if Item.Kind ~= "Bar" then return end
+
+            local Value = Item.Value
+
+            if Side == "Left" or Side == "Right" then
+                Item.Root.Size = UDim2.new(0, 3, 1, 0)
+                Item.Fill.AnchorPoint = Vector2.new(0, 1)
+                Item.Fill.Position = UDim2.new(0, 0, 1, 0)
+                Item.Fill.Size = UDim2.new(1, 0, Value, 0)
+                Item.Region.AnchorPoint = Vector2.new(0.5, 0)
+                Item.Region.Position = UDim2.new(0.5, 0, 0, 0)
+                Item.Region.Size = UDim2.new(0, 14, 1, 0)
+            else
+                Item.Root.Size = UDim2.new(1, 0, 0, 3)
+                Item.Fill.AnchorPoint = Vector2.new(0, 0)
+                Item.Fill.Position = UDim2.new(0, 0, 0, 0)
+                Item.Fill.Size = UDim2.new(Value, 0, 1, 0)
+                Item.Region.AnchorPoint = Vector2.new(0, 0.5)
+                Item.Region.Position = UDim2.new(0, 0, 0.5, 0)
+                Item.Region.Size = UDim2.new(1, 0, 0, 14)
+            end
         end
 
-        local function Dock(Chip, ZoneName, SkipCallback)
-            Chip.Frame.AnchorPoint = Vector2.new(0, 0)
-            Chip.Frame.Position = UDim2.new()
-            Chip.Frame.ZIndex = 9
-            Chip.Frame.Parent = ZoneName and ZoneFrames[ZoneName] or Tray
+        local function Place(Name, Side, SkipCallback)
+            local Item = Items[Name]
+            if not Item then return end
 
-            Dress(Chip, ZoneName ~= nil)
+            Side = Legacy[Side] or Side
+            if Side and not Sides[Side] then Side = nil end
 
-            local Moved = Panel.Value[Chip.Name] ~= ZoneName
-            Panel.Value[Chip.Name] = ZoneName
+            if Side then
+                -- the lower a piece is in Features, the closer it sits to the box
+                local Index = Order[Name] or 99
+                Item.Root.LayoutOrder = (Side == "Top" or Side == "Left") and -Index or Index
+
+                Item.Root.Parent = Stacks[Side]
+                Item.Root.Visible = true
+                Orient(Item, Side)
+                Item.Pill.Visible = false
+            else
+                Item.Root.Visible = false
+                Item.Pill.Visible = true
+            end
+
+            RefreshHint()
+
+            local Moved = Panel.Value[Name] ~= Side
+            Panel.Value[Name] = Side
 
             if Moved and not SkipCallback then
-                Changed()
+                Fire()
             end
         end
 
         --// One drag controller for the whole panel \\--
-        local Active, Pressed = nil, false
-        local StartX, StartY = 0, 0
+        local Drag = { Name = nil, Pressed = false, Moving = false, FromTray = false, X = 0, Y = 0 }
+        local Hovered = nil
 
-        local function BeginDrag()
-            if not Active then return end
+        local function Highlight(Side)
+            if Hovered == Side then return end
 
-            Active.Frame.Parent = DragLayer
-            Active.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
-            Active.Frame.ZIndex = 41
-            Dress(Active, false)
-            Active.Stroke.Color = Library.AccentColor
-            Active.Dragging = true
+            if Hovered and Bands[Hovered] then
+                Library:Animate(Bands[Hovered], { BackgroundTransparency = 1 })
+            end
+
+            Hovered = Side
+
+            if Hovered and Bands[Hovered] then
+                Library:Animate(Bands[Hovered], { BackgroundTransparency = 0.55 })
+            end
         end
 
-        local function EndDrag()
-            if not Active then return end
+        -- Anywhere in the preview maps to a side: split by the box's diagonals.
+        local function SideUnderMouse()
+            if not Library:MouseIsOverFrame(Preview) then return nil end
 
-            local Chip = Active
-            Active, Pressed = nil, false
+            local Position, Size = RigBox.AbsolutePosition, RigBox.AbsoluteSize
+            local DX = (Mouse.X - (Position.X + Size.X / 2)) / math.max(Size.X / 2, 1)
+            local DY = (Mouse.Y - (Position.Y + Size.Y / 2)) / math.max(Size.Y / 2, 1)
 
-            Chip.Dragging = false
-            Chip.Stroke.Color = Library.OutlineColor
+            if math.abs(DX) > math.abs(DY) then
+                return DX < 0 and "Left" or "Right"
+            end
 
-            local Target = ZoneUnderMouse()
+            return DY < 0 and "Top" or "Bottom"
+        end
+
+        local function Press(Name, FromTray)
+            if Drag.Pressed then return end
+
+            Drag.Name, Drag.Pressed, Drag.Moving, Drag.FromTray = Name, true, false, FromTray
+            Drag.X, Drag.Y = Mouse.X, Mouse.Y
+        end
+
+        local function Release()
+            Drag.Name, Drag.Pressed, Drag.Moving = nil, false, false
+            Ghost.Visible = false
             Highlight(nil)
-            Dock(Chip, Target)
         end
 
         Library:GiveSignal(InputService.InputChanged:Connect(function(Input)
-            if not Pressed or not Active then return end
+            if not Drag.Pressed then return end
             if Input.UserInputType ~= Enum.UserInputType.MouseMovement
                 and Input.UserInputType ~= Enum.UserInputType.Touch then return end
 
-            if not Active.Dragging then
-                -- a plain click must not count as a drag
-                if math.abs(Mouse.X - StartX) < 4 and math.abs(Mouse.Y - StartY) < 4 then
+            local Item = Items[Drag.Name]
+            if not Item then return Release() end
+
+            if not Drag.Moving then
+                -- a click is not a drag
+                if math.abs(Mouse.X - Drag.X) < 4 and math.abs(Mouse.Y - Drag.Y) < 4 then
                     return
                 end
 
-                BeginDrag()
+                Drag.Moving = true
+                GhostLabel.Text = Drag.Name
+                Ghost.Visible = true
+
+                -- lift it out so the stack shows the gap it leaves
+                if Drag.FromTray then
+                    Item.Pill.Visible = false
+                else
+                    Item.Root.Visible = false
+                end
             end
 
-            Active.Frame.Position = UDim2.new(
+            Ghost.Position = UDim2.new(
                 0, Mouse.X - DragLayer.AbsolutePosition.X,
                 0, Mouse.Y - DragLayer.AbsolutePosition.Y
             )
 
-            Highlight(ZoneUnderMouse())
+            Highlight(SideUnderMouse())
         end))
 
         Library:GiveSignal(InputService.InputEnded:Connect(function(Input)
-            if not Pressed then return end
+            if not Drag.Pressed then return end
             if Input.UserInputType ~= Enum.UserInputType.MouseButton1
                 and Input.UserInputType ~= Enum.UserInputType.Touch then return end
 
-            if Active and Active.Dragging then
-                EndDrag()
+            local Name, Moving, FromTray = Drag.Name, Drag.Moving, Drag.FromTray
+
+            if Moving then
+                local Side = SideUnderMouse()
+                Release()
+                Place(Name, Side)
             else
-                Active, Pressed = nil, false
+                Release()
+
+                -- clicking a hidden piece brings it back on its usual side
+                if FromTray then
+                    Place(Name, Info.DefaultSides[Name] or "Bottom")
+                end
             end
         end))
 
-        local function MakeChip(Name)
-            local Frame = Library:Create("Frame", {
-                BackgroundColor3 = Library.BackgroundColor,
+        local function MakeItem(Name)
+            local Sample = SampleFor(Name)
+            local IsBar = Info.Bars[Name] and typeof(Sample) == "number"
+
+            local Item = { Name = Name, Kind = IsBar and "Bar" or "Text" }
+
+            if IsBar then
+                Item.Value = math.clamp(Sample, 0, 1)
+
+                Item.Root = Library:Create("Frame", {
+                    BackgroundColor3 = Color3.new(0, 0, 0),
+                    BackgroundTransparency = 0.3,
+                    BorderSizePixel = 0,
+                    Size = UDim2.new(0, 3, 1, 0),
+                    Visible = false,
+                    ZIndex = 12,
+                    Parent = Stacks.Left,
+                })
+
+                Item.Fill = Library:Create("Frame", {
+                    BackgroundColor3 = BarColour(Name, Item.Value),
+                    BorderSizePixel = 0,
+                    ZIndex = 13,
+                    Parent = Item.Root,
+                })
+
+                if Name ~= "Health" then
+                    Library:AddToRegistry(Item.Fill, {
+                        BackgroundColor3 = function() return CustomColours[Name] or Library.AccentColor end;
+                    })
+                end
+            else
+                Item.Root = Library:Create("TextLabel", {
+                    AutomaticSize = Enum.AutomaticSize.XY,
+                    BackgroundTransparency = 1,
+                    Font = Library.Font,
+                    Size = UDim2.new(0, 0, 0, 0),
+                    Text = tostring(Sample),
+                    TextColor3 = Color3.new(1, 1, 1),
+                    TextSize = TextSize,
+                    TextStrokeColor3 = Color3.new(0, 0, 0),
+                    TextStrokeTransparency = 0,
+                    Visible = false,
+                    ZIndex = 12,
+                    Parent = Stacks.Bottom,
+                })
+
+                Library:AddToRegistry(Item.Root, { Font = "Font"; })
+            end
+
+            Item.Region = Library:Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.fromScale(1, 1),
+                Text = "",
+                ZIndex = 14,
+                Parent = Item.Root,
+            })
+
+            Item.Region.InputBegan:Connect(function(Input)
+                if Input.UserInputType == Enum.UserInputType.MouseButton2 then
+                    Place(Name, nil)
+                    return
+                end
+
+                if Input.UserInputType == Enum.UserInputType.MouseButton1
+                    or Input.UserInputType == Enum.UserInputType.Touch then
+                    Press(Name, false)
+                end
+            end)
+
+            --// Pill in the tray \\--
+            Item.Pill = Library:Create("Frame", {
+                AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundColor3 = Library.MainColor,
                 BorderSizePixel = 0,
-                Size = UDim2.new(0, Library:GetTextBounds(Name, Library.Font, 13) + 12, 0, 17),
+                LayoutOrder = Order[Name] or 99,
+                Size = UDim2.new(0, 0, 0, 19),
                 ZIndex = 9,
                 Parent = Tray,
             })
 
-            Library:AddToRegistry(Frame, { BackgroundColor3 = "BackgroundColor"; })
-            local Stroke = Library:RegisterStroke(Frame, "OutlineColor")
-            Library:RegisterCorner(Frame, 0.5)
+            Library:AddToRegistry(Item.Pill, { BackgroundColor3 = "MainColor"; })
+            local PillStroke = Library:RegisterStroke(Item.Pill, "OutlineColor")
+            Library:RegisterCorner(Item.Pill, 0.6)
 
-            local Label = Library:CreateLabel({
-                BackgroundTransparency = 1,
-                Size = UDim2.fromScale(1, 1),
-                TextSize = 13,
-                Text = Name,
-                TextXAlignment = Enum.TextXAlignment.Center,
-                ZIndex = 10,
-                Parent = Frame,
+            Library:Create("UIPadding", {
+                PaddingLeft = UDim.new(0, 8),
+                PaddingRight = UDim.new(0, 8),
+                Parent = Item.Pill,
             })
 
-            local Region = Library:Create("TextButton", {
+            local PillLabel = Library:Create("TextLabel", {
+                AutomaticSize = Enum.AutomaticSize.X,
+                BackgroundTransparency = 1,
+                Font = Library.Font,
+                Size = UDim2.new(0, 0, 1, 0),
+                Text = "+ " .. Name,
+                TextColor3 = Library.FontColor,
+                TextSize = 13,
+                ZIndex = 10,
+                Parent = Item.Pill,
+            })
+
+            Library:AddToRegistry(PillLabel, { TextColor3 = "FontColor"; Font = "Font"; })
+
+            local PillRegion = Library:Create("TextButton", {
                 BackgroundTransparency = 1,
                 Size = UDim2.fromScale(1, 1),
                 Text = "",
                 ZIndex = 11,
-                Parent = Frame,
+                Parent = Item.Pill,
             })
 
-            local Chip = { Name = Name, Frame = Frame, Label = Label, Stroke = Stroke, Dragging = false }
+            PillRegion.MouseEnter:Connect(function()
+                Library:Animate(PillStroke, { Color = Library.AccentColor })
+                Library:Animate(PillLabel, { TextColor3 = Library.AccentColor })
+            end)
 
-            Region.InputBegan:Connect(function(Input)
-                if Input.UserInputType == Enum.UserInputType.MouseButton2 then
-                    Dock(Chip, nil)
-                    return
+            PillRegion.MouseLeave:Connect(function()
+                Library:Animate(PillStroke, { Color = Library.OutlineColor })
+                Library:Animate(PillLabel, { TextColor3 = Library.FontColor })
+            end)
+
+            PillRegion.InputBegan:Connect(function(Input)
+                if Input.UserInputType == Enum.UserInputType.MouseButton1
+                    or Input.UserInputType == Enum.UserInputType.Touch then
+                    Press(Name, true)
                 end
-
-                if Input.UserInputType ~= Enum.UserInputType.MouseButton1
-                    and Input.UserInputType ~= Enum.UserInputType.Touch then return end
-
-                -- only one chip can be in hand at a time
-                if Pressed then return end
-
-                Active, Pressed = Chip, true
-                StartX, StartY = Mouse.X, Mouse.Y
             end)
 
-            table.insert(Library.FontCallbacks, function()
-                Frame.Size = UDim2.new(0, Library:GetTextBounds(Name, Library.Font, 13) + 12, 0, 17)
-            end)
-
-            Chips[Name] = Chip
-            return Chip
+            Items[Name] = Item
+            return Item
         end
 
         for _, Name in next, Panel.Features do
-            MakeChip(Name)
+            MakeItem(Name)
         end
 
         --// API \\--
         function Panel:SetValue(NewValue, SkipCallback)
             NewValue = typeof(NewValue) == "table" and NewValue or {}
 
-            for Name, Chip in next, Chips do
-                local ZoneName = NewValue[Name]
-
-                if ZoneName and not ZoneFrames[ZoneName] then
-                    ZoneName = nil
-                end
-
-                Dock(Chip, ZoneName, true)
+            for Name in next, Items do
+                Place(Name, NewValue[Name], true)
             end
 
             if not SkipCallback then
-                Changed()
+                Fire()
             end
         end
 
         function Panel:GetLayout()
             local Copy = {}
 
-            for Name, ZoneName in next, Panel.Value do
-                Copy[Name] = ZoneName
+            for Name, Side in next, Panel.Value do
+                Copy[Name] = Side
             end
 
             return Copy
+        end
+
+        -- Change what a piece shows: text for labels, 0 to 1 for bars.
+        function Panel:SetSample(Name, Sample)
+            local Item = Items[Name]
+            if not Item then return end
+
+            if Item.Kind == "Bar" then
+                Item.Value = math.clamp(tonumber(Sample) or 0, 0, 1)
+
+                if Name == "Health" then
+                    Item.Fill.BackgroundColor3 = BarColour(Name, Item.Value)
+                end
+
+                Orient(Item, Panel.Value[Name] or "Left")
+            else
+                Item.Root.Text = tostring(Sample)
+            end
+        end
+
+        -- Key is "Box", "Tracer", "Chams", or the name of a piece.
+        function Panel:SetColor(Key, Colour)
+            if typeof(Colour) ~= "Color3" then return end
+
+            if Key == "Chams" then
+                Chams.Color = Colour
+                if Chams.Enabled then ApplyChams() end
+                return
+            end
+
+            CustomColours[Key] = Colour
+
+            if Key == "Box" then
+                BoxStroke.Color = Colour
+
+                for _, Piece in next, Corners do
+                    Piece.BackgroundColor3 = Colour
+                end
+
+                if not CustomColours.Tracer then
+                    Tracer.BackgroundColor3 = Colour
+                end
+            elseif Key == "Tracer" then
+                Tracer.BackgroundColor3 = Colour
+            else
+                local Item = Items[Key]
+                if not Item then return end
+
+                if Item.Kind == "Bar" then
+                    Item.Fill.BackgroundColor3 = Colour
+                else
+                    Item.Root.TextColor3 = Colour
+                end
+            end
+        end
+
+        function Panel:SetTextSize(Size)
+            TextSize = math.clamp(tonumber(Size) or TextSize, 8, 24)
+
+            for _, Item in next, Items do
+                if Item.Kind == "Text" then
+                    Item.Root.TextSize = TextSize
+                end
+            end
         end
 
         function Panel:OnChanged(Func)
@@ -6666,10 +7226,10 @@ do
         end
 
         function Panel:SetHeight(Height)
-            Panel.Height = math.max(tonumber(Height) or Panel.Height, 160)
+            Panel.Height = math.max(tonumber(Height) or Panel.Height, 200)
             Holder.Size = UDim2.new(1, -4, 0, Panel.Height)
             Groupbox:Resize()
-            task.defer(Focus)
+            task.defer(Layout)
         end
 
         function Panel:SetVisible(Visible)
@@ -6682,6 +7242,14 @@ do
         end
 
         Panel:SetValue(Info.Default, true)
+        Panel:SetBoxStyle(Info.BoxStyle)
+
+        if typeof(Info.BoxColor) == "Color3" then
+            Panel:SetColor("Box", Info.BoxColor)
+        end
+
+        Panel:SetTracer(Info.Tracer, Info.TracerOrigin)
+        Panel:SetChams(Info.Chams.Enabled, Info.Chams.Color, Info.Chams.Transparency)
 
         --// What stands in the box \\--
         if typeof(Info.Model) == "Instance" then
@@ -6698,7 +7266,9 @@ do
                 -- the script usually runs before the character exists
                 task.spawn(function()
                     for _ = 1, 20 do
-                        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("BasePart") then
+                        local Character = LocalPlayer.Character
+
+                        if Character and Character:FindFirstChildWhichIsA("BasePart") then
                             Panel:UseCharacter()
                             return
                         end
@@ -6710,6 +7280,8 @@ do
         else
             Panel:ClearModel()
         end
+
+        task.defer(Layout)
 
         Blank = Groupbox:AddBlank(10, Panel.Visible)
         Groupbox:Resize()
