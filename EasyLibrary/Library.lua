@@ -6147,11 +6147,11 @@ do
         return Viewport
     end
 
-    --// ESP layout panel: drag a label onto any side of the rig and it sits there \\--
+    --// ESP layout panel: drag a label to any side of the rig and it sits there \\--
     function BaseGroupboxFuncs:AddESPPanel(Idx, Info)
         Info = Library:Validate(Info or {}, {
             Text = "ESP layout",
-            Height = 230,
+            Height = 300,
             Features = { "Name", "Health", "Distance", "Weapon", "Tool" },
             Default = {},
             Model = nil,
@@ -6160,10 +6160,20 @@ do
             Callback = function() end,
         })
 
-        local SlotCell = {
-            TopLeft     = { 0, 0 }, Top    = { 1, 0 }, TopRight    = { 2, 0 },
-            Left        = { 0, 1 },                    Right       = { 2, 1 },
-            BottomLeft  = { 0, 2 }, Bottom = { 1, 2 }, BottomRight = { 2, 2 },
+        -- the rig sits in the middle; the eight zones tile the rest of the
+        -- preview edge to edge, so a drop can never land in a dead spot
+        local BoxX, BoxW = 0.34, 0.32
+        local BoxY, BoxH = 0.20, 0.60
+
+        local Zones = {
+            TopLeft     = { 0, 0, BoxX, BoxY, Enum.HorizontalAlignment.Left,   Enum.VerticalAlignment.Bottom },
+            Top         = { BoxX, 0, BoxW, BoxY, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Bottom },
+            TopRight    = { BoxX + BoxW, 0, 1 - BoxX - BoxW, BoxY, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Bottom },
+            Left        = { 0, BoxY, BoxX, BoxH, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Center },
+            Right       = { BoxX + BoxW, BoxY, 1 - BoxX - BoxW, BoxH, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Center },
+            BottomLeft  = { 0, BoxY + BoxH, BoxX, 1 - BoxY - BoxH, Enum.HorizontalAlignment.Left, Enum.VerticalAlignment.Top },
+            Bottom      = { BoxX, BoxY + BoxH, BoxW, 1 - BoxY - BoxH, Enum.HorizontalAlignment.Center, Enum.VerticalAlignment.Top },
+            BottomRight = { BoxX + BoxW, BoxY + BoxH, 1 - BoxX - BoxW, 1 - BoxY - BoxH, Enum.HorizontalAlignment.Right, Enum.VerticalAlignment.Top },
         }
 
         local Panel = {
@@ -6197,13 +6207,13 @@ do
             Parent = Holder,
         })
 
-        --// Preview area \\--
+        --// Preview \\--
         local Preview = Library:Create("Frame", {
             BackgroundColor3 = Library.MainColor,
             BorderColor3 = Library.OutlineColor,
             ClipsDescendants = true,
             Position = UDim2.new(0, 0, 0, 18),
-            Size = UDim2.new(1, 0, 1, -46),
+            Size = UDim2.new(1, 0, 1, -48),
             ZIndex = 6,
             Parent = Holder,
         })
@@ -6216,12 +6226,11 @@ do
         Library:RegisterStroke(Preview, "OutlineColor")
         Library:RegisterCorner(Preview, 0.6)
 
-        --// The rig, in an ESP box, in the middle cell \\--
+        --// Rig, inside an ESP box \\--
         local RigBox = Library:Create("Frame", {
-            AnchorPoint = Vector2.new(0.5, 0.5),
             BackgroundTransparency = 1,
-            Position = UDim2.fromScale(0.5, 0.5),
-            Size = UDim2.new(0, 48, 1 / 3, 22),
+            Position = UDim2.fromScale(BoxX, BoxY),
+            Size = UDim2.fromScale(BoxW, BoxH),
             ZIndex = 7,
             Parent = Preview,
         })
@@ -6242,23 +6251,23 @@ do
         local WorldModel = Library:Create("WorldModel", { Parent = Viewport })
         local CurrentModel
 
-        -- a viewport with no light of its own renders everything flat and dark
+        -- a viewport carries no light of its own; without this everything in
+        -- it renders black
         Viewport.Ambient = Color3.fromRGB(190, 190, 190)
         Viewport.LightColor = Color3.fromRGB(255, 255, 255)
         Viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
 
-        -- Blocky R6 stand-in, used when there is no character and no model.
         local function BuildDummy()
             local Dummy = Instance.new("Model")
             Dummy.Name = "Dummy"
 
-            local function Part(Name, SizeV, PositionV)
+            local function Part(Name, SizeV, PositionV, Colour)
                 local Block = Instance.new("Part")
                 Block.Name = Name
                 Block.Anchored = true
                 Block.CanCollide = false
                 Block.Material = Enum.Material.SmoothPlastic
-                Block.Color = Color3.fromRGB(170, 170, 175)
+                Block.Color = Colour or Color3.fromRGB(170, 170, 175)
                 Block.Size = SizeV
                 Block.CFrame = CFrame.new(PositionV)
                 Block.Parent = Dummy
@@ -6266,7 +6275,7 @@ do
             end
 
             local Torso = Part("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0))
-            Part("Head", Vector3.new(1.6, 1.2, 1.2), Vector3.new(0, 4.6, 0)).Color = Color3.fromRGB(205, 200, 160)
+            Part("Head", Vector3.new(1.6, 1.2, 1.2), Vector3.new(0, 4.6, 0), Color3.fromRGB(205, 200, 160))
             Part("LeftArm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 3, 0))
             Part("RightArm", Vector3.new(1, 2, 1), Vector3.new(1.5, 3, 0))
             Part("LeftLeg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0))
@@ -6276,8 +6285,6 @@ do
             return Dummy
         end
 
-        -- Pulls the camera back far enough that the whole model fits the box,
-        -- taking the box's aspect ratio into account.
         local function Focus()
             if not CurrentModel then return end
 
@@ -6285,8 +6292,7 @@ do
                 return CurrentModel:GetExtentsSize(), CurrentModel:GetPivot()
             end)
 
-            if not Ok or typeof(Size) ~= "Vector3" then return end
-            if Size.Y <= 0 then return end
+            if not Ok or typeof(Size) ~= "Vector3" or Size.Y <= 0 then return end
 
             local Box = RigBox.AbsoluteSize
             local Aspect = (Box.X > 0 and Box.Y > 0) and (Box.X / Box.Y) or 0.55
@@ -6295,10 +6301,10 @@ do
             local NeedY = (Size.Y / 2) / Half
             local NeedX = (math.max(Size.X, Size.Z) / 2) / (Half * Aspect)
 
-            local Distance = math.max(NeedX, NeedY) * 1.18
-            local Centre = Pivot.Position
-
-            Camera.CFrame = CFrame.new(Centre + Vector3.new(0, 0, Distance), Centre)
+            Camera.CFrame = CFrame.new(
+                Pivot.Position + Vector3.new(0, 0, math.max(NeedX, NeedY) * 1.1),
+                Pivot.Position
+            )
         end
 
         local function Show(Model)
@@ -6321,8 +6327,6 @@ do
 
             if not Ok or not Clone then return false end
 
-            -- a cloned character brings scripts and a humanoid along, none of
-            -- which should run inside a viewport
             for _, Child in next, Clone:GetDescendants() do
                 if Child:IsA("BaseScript") or Child:IsA("Sound") or Child:IsA("ParticleEmitter")
                     or Child:IsA("Beam") or Child:IsA("Trail") then
@@ -6343,7 +6347,7 @@ do
             CurrentModel = Clone
 
             Focus()
-            task.defer(Focus) -- AbsoluteSize is still 0 on the first frame
+            task.defer(Focus) -- AbsoluteSize is still zero on the first frame
 
             return true
         end
@@ -6377,41 +6381,47 @@ do
         Panel.Viewport = Viewport
         RigBox:GetPropertyChangedSignal("AbsoluteSize"):Connect(Focus)
 
+        --// Drop zones \\--
+        local ZoneFrames = {}
 
-        --// Drop slots \\--
-        local SlotFrames = {}
-
-        for Name, Cell in next, SlotCell do
-            local Slot = Library:Create("Frame", {
+        for Name, Spec in next, Zones do
+            local Zone = Library:Create("Frame", {
                 BackgroundColor3 = Library.AccentColor,
                 BackgroundTransparency = 1,
                 BorderSizePixel = 0,
-                Position = UDim2.fromScale(Cell[1] / 3, Cell[2] / 3),
-                Size = UDim2.fromScale(1 / 3, 1 / 3),
+                Position = UDim2.fromScale(Spec[1], Spec[2]),
+                Size = UDim2.fromScale(Spec[3], Spec[4]),
                 ZIndex = 7,
                 Parent = Preview,
             })
 
-            Library:AddToRegistry(Slot, { BackgroundColor3 = "AccentColor"; })
-            Library:RegisterCorner(Slot, 0.4)
+            Library:AddToRegistry(Zone, { BackgroundColor3 = "AccentColor"; })
 
             Library:Create("UIListLayout", {
-                Padding = UDim.new(0, 2),
+                Padding = UDim.new(0, 1),
                 FillDirection = Enum.FillDirection.Vertical,
-                HorizontalAlignment = Enum.HorizontalAlignment.Center,
-                VerticalAlignment = Enum.VerticalAlignment.Center,
+                HorizontalAlignment = Spec[5],
+                VerticalAlignment = Spec[6],
                 SortOrder = Enum.SortOrder.LayoutOrder,
-                Parent = Slot,
+                Parent = Zone,
             })
 
-            SlotFrames[Name] = Slot
+            Library:Create("UIPadding", {
+                PaddingLeft = UDim.new(0, 3),
+                PaddingRight = UDim.new(0, 3),
+                PaddingTop = UDim.new(0, 2),
+                PaddingBottom = UDim.new(0, 2),
+                Parent = Zone,
+            })
+
+            ZoneFrames[Name] = Zone
         end
 
-        --// Tray for anything not placed \\--
+        --// Tray \\--
         local Tray = Library:Create("Frame", {
             BackgroundTransparency = 1,
-            Position = UDim2.new(0, 0, 1, -24),
-            Size = UDim2.new(1, 0, 0, 22),
+            Position = UDim2.new(0, 0, 1, -26),
+            Size = UDim2.new(1, 0, 0, 24),
             ZIndex = 6,
             Parent = Holder,
         })
@@ -6444,49 +6454,123 @@ do
             end
         end
 
-        local function Highlight(SlotName)
-            if Hovered == SlotName then return end
+        local function Highlight(ZoneName)
+            if Hovered == ZoneName then return end
 
-            if Hovered and SlotFrames[Hovered] then
-                Library:Animate(SlotFrames[Hovered], { BackgroundTransparency = 1 })
+            if Hovered and ZoneFrames[Hovered] then
+                Library:Animate(ZoneFrames[Hovered], { BackgroundTransparency = 1 })
             end
 
-            Hovered = SlotName
+            Hovered = ZoneName
 
-            if Hovered and SlotFrames[Hovered] then
-                Library:Animate(SlotFrames[Hovered], { BackgroundTransparency = 0.85 })
+            if Hovered and ZoneFrames[Hovered] then
+                Library:Animate(ZoneFrames[Hovered], { BackgroundTransparency = 0.82 })
             end
         end
 
-        local function SlotUnderMouse()
-            for SlotName, Slot in next, SlotFrames do
-                if Library:MouseIsOverFrame(Slot) then
-                    return SlotName
+        local function ZoneUnderMouse()
+            if not Library:MouseIsOverFrame(Preview) then return nil end
+
+            for ZoneName, Zone in next, ZoneFrames do
+                if Library:MouseIsOverFrame(Zone) then
+                    return ZoneName
                 end
             end
 
             return nil
         end
 
-        local function Dock(Chip, SlotName, SkipCallback)
+        -- a docked label should read like real ESP text, not like a button
+        local function Dress(Chip, Docked)
+            Chip.Frame.BackgroundTransparency = Docked and 1 or 0
+            Chip.Stroke.Transparency = Docked and 1 or 0
+            Chip.Label.TextSize = Docked and 12 or 13
+        end
+
+        local function Dock(Chip, ZoneName, SkipCallback)
             Chip.Frame.AnchorPoint = Vector2.new(0, 0)
             Chip.Frame.Position = UDim2.new()
             Chip.Frame.ZIndex = 9
-            Chip.Frame.Parent = SlotName and SlotFrames[SlotName] or Tray
+            Chip.Frame.Parent = ZoneName and ZoneFrames[ZoneName] or Tray
 
-            local Changedp = Panel.Value[Chip.Name] ~= SlotName
-            Panel.Value[Chip.Name] = SlotName
+            Dress(Chip, ZoneName ~= nil)
 
-            if Changedp and not SkipCallback then
+            local Moved = Panel.Value[Chip.Name] ~= ZoneName
+            Panel.Value[Chip.Name] = ZoneName
+
+            if Moved and not SkipCallback then
                 Changed()
             end
         end
+
+        --// One drag controller for the whole panel \\--
+        local Active, Pressed = nil, false
+        local StartX, StartY = 0, 0
+
+        local function BeginDrag()
+            if not Active then return end
+
+            Active.Frame.Parent = DragLayer
+            Active.Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+            Active.Frame.ZIndex = 41
+            Dress(Active, false)
+            Active.Stroke.Color = Library.AccentColor
+            Active.Dragging = true
+        end
+
+        local function EndDrag()
+            if not Active then return end
+
+            local Chip = Active
+            Active, Pressed = nil, false
+
+            Chip.Dragging = false
+            Chip.Stroke.Color = Library.OutlineColor
+
+            local Target = ZoneUnderMouse()
+            Highlight(nil)
+            Dock(Chip, Target)
+        end
+
+        Library:GiveSignal(InputService.InputChanged:Connect(function(Input)
+            if not Pressed or not Active then return end
+            if Input.UserInputType ~= Enum.UserInputType.MouseMovement
+                and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+            if not Active.Dragging then
+                -- a plain click must not count as a drag
+                if math.abs(Mouse.X - StartX) < 4 and math.abs(Mouse.Y - StartY) < 4 then
+                    return
+                end
+
+                BeginDrag()
+            end
+
+            Active.Frame.Position = UDim2.new(
+                0, Mouse.X - DragLayer.AbsolutePosition.X,
+                0, Mouse.Y - DragLayer.AbsolutePosition.Y
+            )
+
+            Highlight(ZoneUnderMouse())
+        end))
+
+        Library:GiveSignal(InputService.InputEnded:Connect(function(Input)
+            if not Pressed then return end
+            if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+                and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+            if Active and Active.Dragging then
+                EndDrag()
+            else
+                Active, Pressed = nil, false
+            end
+        end))
 
         local function MakeChip(Name)
             local Frame = Library:Create("Frame", {
                 BackgroundColor3 = Library.BackgroundColor,
                 BorderSizePixel = 0,
-                Size = UDim2.new(0, Library:GetTextBounds(Name, Library.Font, 13) + 12, 0, 16),
+                Size = UDim2.new(0, Library:GetTextBounds(Name, Library.Font, 13) + 12, 0, 17),
                 ZIndex = 9,
                 Parent = Tray,
             })
@@ -6513,31 +6597,7 @@ do
                 Parent = Frame,
             })
 
-            local Chip = { Name = Name, Frame = Frame, Label = Label }
-
-            Library:OnHighlight(Region, Frame, { BackgroundColor3 = "MainColor" }, { BackgroundColor3 = "BackgroundColor" })
-
-            local Pressed, Dragging = false, false
-            local StartX, StartY = 0, 0
-
-            local function StartDrag()
-                Dragging = true
-
-                Frame.Parent = DragLayer
-                Frame.AnchorPoint = Vector2.new(0.5, 0.5)
-                Frame.ZIndex = 41
-                Stroke.Color = Library.AccentColor
-            end
-
-            local function StopDrag()
-                Dragging = false
-                Pressed = false
-                Stroke.Color = Library.OutlineColor
-
-                local Target = SlotUnderMouse()
-                Highlight(nil)
-                Dock(Chip, Target)
-            end
+            local Chip = { Name = Name, Frame = Frame, Label = Label, Stroke = Stroke, Dragging = false }
 
             Region.InputBegan:Connect(function(Input)
                 if Input.UserInputType == Enum.UserInputType.MouseButton2 then
@@ -6548,46 +6608,15 @@ do
                 if Input.UserInputType ~= Enum.UserInputType.MouseButton1
                     and Input.UserInputType ~= Enum.UserInputType.Touch then return end
 
-                Pressed = true
+                -- only one chip can be in hand at a time
+                if Pressed then return end
+
+                Active, Pressed = Chip, true
                 StartX, StartY = Mouse.X, Mouse.Y
             end)
 
-            Library:GiveSignal(InputService.InputChanged:Connect(function(Input)
-                if not Pressed then return end
-                if Input.UserInputType ~= Enum.UserInputType.MouseMovement
-                    and Input.UserInputType ~= Enum.UserInputType.Touch then return end
-
-                -- a plain click should not count as a drag
-                if not Dragging then
-                    if math.abs(Mouse.X - StartX) < 4 and math.abs(Mouse.Y - StartY) < 4 then
-                        return
-                    end
-
-                    StartDrag()
-                end
-
-                Frame.Position = UDim2.new(
-                    0, Mouse.X - DragLayer.AbsolutePosition.X,
-                    0, Mouse.Y - DragLayer.AbsolutePosition.Y
-                )
-
-                Highlight(SlotUnderMouse())
-            end))
-
-            Library:GiveSignal(InputService.InputEnded:Connect(function(Input)
-                if not Pressed then return end
-                if Input.UserInputType ~= Enum.UserInputType.MouseButton1
-                    and Input.UserInputType ~= Enum.UserInputType.Touch then return end
-
-                if Dragging then
-                    StopDrag()
-                else
-                    Pressed = false
-                end
-            end))
-
             table.insert(Library.FontCallbacks, function()
-                Frame.Size = UDim2.new(0, Library:GetTextBounds(Name, Library.Font, 13) + 12, 0, 16)
+                Frame.Size = UDim2.new(0, Library:GetTextBounds(Name, Library.Font, 13) + 12, 0, 17)
             end)
 
             Chips[Name] = Chip
@@ -6603,13 +6632,13 @@ do
             NewValue = typeof(NewValue) == "table" and NewValue or {}
 
             for Name, Chip in next, Chips do
-                local SlotName = NewValue[Name]
+                local ZoneName = NewValue[Name]
 
-                if SlotName and not SlotFrames[SlotName] then
-                    SlotName = nil
+                if ZoneName and not ZoneFrames[ZoneName] then
+                    ZoneName = nil
                 end
 
-                Dock(Chip, SlotName, true)
+                Dock(Chip, ZoneName, true)
             end
 
             if not SkipCallback then
@@ -6620,8 +6649,8 @@ do
         function Panel:GetLayout()
             local Copy = {}
 
-            for Name, SlotName in next, Panel.Value do
-                Copy[Name] = SlotName
+            for Name, ZoneName in next, Panel.Value do
+                Copy[Name] = ZoneName
             end
 
             return Copy
@@ -6636,6 +6665,13 @@ do
             Panel:SetValue({})
         end
 
+        function Panel:SetHeight(Height)
+            Panel.Height = math.max(tonumber(Height) or Panel.Height, 160)
+            Holder.Size = UDim2.new(1, -4, 0, Panel.Height)
+            Groupbox:Resize()
+            task.defer(Focus)
+        end
+
         function Panel:SetVisible(Visible)
             Panel.Visible = Visible
 
@@ -6647,7 +6683,7 @@ do
 
         Panel:SetValue(Info.Default, true)
 
-        --// Pick what stands in the box \\--
+        --// What stands in the box \\--
         if typeof(Info.Model) == "Instance" then
             Panel:SetModel(Info.Model)
         elseif Info.UseLocalCharacter then
@@ -6659,10 +6695,9 @@ do
                     Panel:UseCharacter()
                 end))
 
-                -- the script often runs before the character exists
+                -- the script usually runs before the character exists
                 task.spawn(function()
                     for _ = 1, 20 do
-                        if Panel.Visible == false then return end
                         if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("BasePart") then
                             Panel:UseCharacter()
                             return
