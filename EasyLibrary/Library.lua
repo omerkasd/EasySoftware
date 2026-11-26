@@ -6235,81 +6235,88 @@ do
             Parent = RigBox,
         })
 
-        -- shown only when there is no model to put in the viewport
-        local Silhouette = Library:Create("Frame", {
-            BackgroundTransparency = 1,
-            Size = UDim2.fromScale(1, 1),
-            ZIndex = 8,
-            Parent = RigBox,
-        })
+        --// Model handling \\--
+        local Camera = Library:Create("Camera", { FieldOfView = 50, Parent = Viewport })
+        Viewport.CurrentCamera = Camera
 
-        local function Limb(X, Y, W, H)
-            local Part = Library:Create("Frame", {
-                AnchorPoint = Vector2.new(0.5, 0),
-                BackgroundColor3 = Library.FontColor,
-                BackgroundTransparency = 0.55,
-                BorderSizePixel = 0,
-                Position = UDim2.new(0.5, X, 0, Y),
-                Size = UDim2.new(0, W, 0, H),
-                ZIndex = 9,
-                Parent = Silhouette,
-            })
+        local WorldModel = Library:Create("WorldModel", { Parent = Viewport })
+        local CurrentModel
 
-            Library:AddToRegistry(Part, { BackgroundColor3 = "FontColor"; })
-            Library:RegisterCorner(Part, 0.3)
+        -- a viewport with no light of its own renders everything flat and dark
+        Viewport.Ambient = Color3.fromRGB(190, 190, 190)
+        Viewport.LightColor = Color3.fromRGB(255, 255, 255)
+        Viewport.LightDirection = Vector3.new(-0.4, -1, -0.6)
+
+        -- Blocky R6 stand-in, used when there is no character and no model.
+        local function BuildDummy()
+            local Dummy = Instance.new("Model")
+            Dummy.Name = "Dummy"
+
+            local function Part(Name, SizeV, PositionV)
+                local Block = Instance.new("Part")
+                Block.Name = Name
+                Block.Anchored = true
+                Block.CanCollide = false
+                Block.Material = Enum.Material.SmoothPlastic
+                Block.Color = Color3.fromRGB(170, 170, 175)
+                Block.Size = SizeV
+                Block.CFrame = CFrame.new(PositionV)
+                Block.Parent = Dummy
+                return Block
+            end
+
+            local Torso = Part("Torso", Vector3.new(2, 2, 1), Vector3.new(0, 3, 0))
+            Part("Head", Vector3.new(1.6, 1.2, 1.2), Vector3.new(0, 4.6, 0)).Color = Color3.fromRGB(205, 200, 160)
+            Part("LeftArm", Vector3.new(1, 2, 1), Vector3.new(-1.5, 3, 0))
+            Part("RightArm", Vector3.new(1, 2, 1), Vector3.new(1.5, 3, 0))
+            Part("LeftLeg", Vector3.new(1, 2, 1), Vector3.new(-0.5, 1, 0))
+            Part("RightLeg", Vector3.new(1, 2, 1), Vector3.new(0.5, 1, 0))
+
+            Dummy.PrimaryPart = Torso
+            return Dummy
         end
 
-        Limb(0, 10, 14, 14)
-        Limb(0, 26, 18, 30)
-        Limb(-13, 28, 6, 24)
-        Limb(13, 28, 6, 24)
-        Limb(-5, 56, 7, 24)
-        Limb(5, 56, 7, 24)
+        -- Pulls the camera back far enough that the whole model fits the box,
+        -- taking the box's aspect ratio into account.
+        local function Focus()
+            if not CurrentModel then return end
 
-        --// Model handling \\--
-        local WorldModel, Camera, CurrentModel
+            local Ok, Size, Pivot = pcall(function()
+                return CurrentModel:GetExtentsSize(), CurrentModel:GetPivot()
+            end)
 
-        local function ClearModel()
+            if not Ok or typeof(Size) ~= "Vector3" then return end
+            if Size.Y <= 0 then return end
+
+            local Box = RigBox.AbsoluteSize
+            local Aspect = (Box.X > 0 and Box.Y > 0) and (Box.X / Box.Y) or 0.55
+
+            local Half = math.tan(math.rad(Camera.FieldOfView) / 2)
+            local NeedY = (Size.Y / 2) / Half
+            local NeedX = (math.max(Size.X, Size.Z) / 2) / (Half * Aspect)
+
+            local Distance = math.max(NeedX, NeedY) * 1.18
+            local Centre = Pivot.Position
+
+            Camera.CFrame = CFrame.new(Centre + Vector3.new(0, 0, Distance), Centre)
+        end
+
+        local function Show(Model)
             if CurrentModel then
                 CurrentModel:Destroy()
                 CurrentModel = nil
             end
 
-            Silhouette.Visible = true
-        end
-
-        -- Frames the camera so the whole model fits in the viewport.
-        local function Focus(Model)
-            local Ok, Size, Pivot = pcall(function()
-                return Model:GetExtentsSize(), Model:GetPivot()
-            end)
-
-            if not Ok or typeof(Size) ~= "Vector3" then return false end
-
-            local Biggest = math.max(Size.X, Size.Y, Size.Z)
-            if Biggest <= 0 then return false end
-
-            local Distance = Biggest * 1.9
-            local Centre = Pivot.Position
-
-            Camera.CFrame = CFrame.new(Centre + Vector3.new(0, Size.Y * 0.08, Distance), Centre)
-            return true
-        end
-
-        function Panel:SetModel(Model)
-            ClearModel()
-
             if typeof(Model) ~= "Instance" then return false end
 
-            if not WorldModel then
-                Camera = Library:Create("Camera", { FieldOfView = 55, Parent = Viewport })
-                Viewport.CurrentCamera = Camera
-
-                WorldModel = Library:Create("WorldModel", { Parent = Viewport })
-            end
-
             local Ok, Clone = pcall(function()
-                return Model:Clone()
+                local Archivable = Model.Archivable
+                Model.Archivable = true
+
+                local Copy = Model:Clone()
+                Model.Archivable = Archivable
+
+                return Copy
             end)
 
             if not Ok or not Clone then return false end
@@ -6317,15 +6324,13 @@ do
             -- a cloned character brings scripts and a humanoid along, none of
             -- which should run inside a viewport
             for _, Child in next, Clone:GetDescendants() do
-                if Child:IsA("BaseScript") or Child:IsA("Sound") or Child:IsA("ParticleEmitter") then
+                if Child:IsA("BaseScript") or Child:IsA("Sound") or Child:IsA("ParticleEmitter")
+                    or Child:IsA("Beam") or Child:IsA("Trail") then
                     pcall(function() Child:Destroy() end)
-                elseif Child:IsA("Humanoid") then
-                    pcall(function()
-                        Child.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-                    end)
                 elseif Child:IsA("BasePart") then
                     Child.Anchored = true
                     Child.CanCollide = false
+                    Child.CastShadow = false
                 end
             end
 
@@ -6337,25 +6342,41 @@ do
             Clone.Parent = WorldModel
             CurrentModel = Clone
 
-            if not Focus(Clone) then
-                ClearModel()
-                return false
-            end
+            Focus()
+            task.defer(Focus) -- AbsoluteSize is still 0 on the first frame
 
-            Silhouette.Visible = false
             return true
+        end
+
+        function Panel:SetModel(Model)
+            if Show(Model) then return true end
+
+            Show(BuildDummy())
+            return false
         end
 
         function Panel:UseCharacter()
             local Character = LocalPlayer and LocalPlayer.Character
-            if not Character then return false end
 
-            return Panel:SetModel(Character)
+            if Character and Character:FindFirstChildWhichIsA("BasePart") then
+                return Panel:SetModel(Character)
+            end
+
+            Show(BuildDummy())
+            return false
         end
 
         function Panel:ClearModel()
-            ClearModel()
+            Show(BuildDummy())
         end
+
+        function Panel:Refocus()
+            Focus()
+        end
+
+        Panel.Viewport = Viewport
+        RigBox:GetPropertyChangedSignal("AbsoluteSize"):Connect(Focus)
+
 
         --// Drop slots \\--
         local SlotFrames = {}
@@ -6637,7 +6658,22 @@ do
                     task.wait(1)
                     Panel:UseCharacter()
                 end))
+
+                -- the script often runs before the character exists
+                task.spawn(function()
+                    for _ = 1, 20 do
+                        if Panel.Visible == false then return end
+                        if LocalPlayer.Character and LocalPlayer.Character:FindFirstChildWhichIsA("BasePart") then
+                            Panel:UseCharacter()
+                            return
+                        end
+
+                        task.wait(0.5)
+                    end
+                end)
             end
+        else
+            Panel:ClearModel()
         end
 
         Blank = Groupbox:AddBlank(10, Panel.Visible)
