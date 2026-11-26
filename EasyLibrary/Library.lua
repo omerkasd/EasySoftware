@@ -6147,6 +6147,369 @@ do
         return Viewport
     end
 
+    --// ESP layout panel: drag a label onto any side of the rig and it sits there \\--
+    function BaseGroupboxFuncs:AddESPPanel(Idx, Info)
+        Info = Library:Validate(Info or {}, {
+            Text = "ESP layout",
+            Height = 220,
+            Features = { "Name", "Health", "Distance", "Weapon", "Tool" },
+            Default = {},
+            Visible = true,
+            Callback = function() end,
+        })
+
+        local Slots = {
+            "TopLeft", "Top", "TopRight",
+            "Left", "Right",
+            "BottomLeft", "Bottom", "BottomRight",
+        }
+
+        local SlotCell = {
+            TopLeft     = { 0, 0 }, Top    = { 1, 0 }, TopRight    = { 2, 0 },
+            Left        = { 0, 1 },                    Right       = { 2, 1 },
+            BottomLeft  = { 0, 2 }, Bottom = { 1, 2 }, BottomRight = { 2, 2 },
+        }
+
+        local Panel = {
+            Value = {},
+            Features = Info.Features,
+            Height = Info.Height,
+            Text = Info.Text,
+            Visible = Info.Visible,
+            Type = "ESPPanel",
+            Callbacks = {},
+        }
+
+        local Blank = nil
+        local Groupbox = self
+        local Container = Groupbox.Container
+
+        local Holder = Library:Create("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.new(1, -4, 0, Panel.Height),
+            Visible = Panel.Visible,
+            Parent = Container,
+        })
+
+        Library:CreateLabel({
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 0, 0, 0),
+            Size = UDim2.new(1, 0, 0, 16),
+            TextSize = 14,
+            Text = Panel.Text,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            ZIndex = 6,
+            Parent = Holder,
+        })
+
+        --// Preview area \\--
+        local Preview = Library:Create("Frame", {
+            BackgroundColor3 = Library.MainColor,
+            BorderColor3 = Library.OutlineColor,
+            Position = UDim2.new(0, 0, 0, 18),
+            Size = UDim2.new(1, 0, 1, -46),
+            ZIndex = 6,
+            Parent = Holder,
+        })
+
+        Library:AddToRegistry(Preview, {
+            BackgroundColor3 = "MainColor";
+            BorderColor3 = "OutlineColor";
+        })
+
+        Library:RegisterStroke(Preview, "OutlineColor")
+        Library:RegisterCorner(Preview, 0.6)
+
+        --// Drop slots: a 3x3 grid with the rig in the middle \\--
+        local SlotFrames = {}
+
+        for _, Name in next, Slots do
+            local Cell = SlotCell[Name]
+
+            local Slot = Library:Create("Frame", {
+                BackgroundTransparency = 1,
+                Position = UDim2.fromScale(Cell[1] / 3, Cell[2] / 3),
+                Size = UDim2.fromScale(1 / 3, 1 / 3),
+                ZIndex = 7,
+                Parent = Preview,
+            })
+
+            Library:Create("UIListLayout", {
+                Padding = UDim.new(0, 2),
+                FillDirection = Enum.FillDirection.Vertical,
+                HorizontalAlignment = Enum.HorizontalAlignment.Center,
+                VerticalAlignment = Enum.VerticalAlignment.Center,
+                SortOrder = Enum.SortOrder.LayoutOrder,
+                Parent = Slot,
+            })
+
+            SlotFrames[Name] = Slot
+        end
+
+        --// The rig: a plain silhouette inside an ESP box \\--
+        local Rig = Library:Create("Frame", {
+            AnchorPoint = Vector2.new(0.5, 0.5),
+            BackgroundTransparency = 1,
+            Position = UDim2.fromScale(0.5, 0.5),
+            Size = UDim2.new(0, 42, 0, 86),
+            ZIndex = 7,
+            Parent = Preview,
+        })
+
+        Library:RegisterStroke(Rig, "AccentColor")
+
+        local function Limb(X, Y, W, H)
+            local Part = Library:Create("Frame", {
+                AnchorPoint = Vector2.new(0.5, 0),
+                BackgroundColor3 = Library.FontColor,
+                BackgroundTransparency = 0.55,
+                BorderSizePixel = 0,
+                Position = UDim2.new(0.5, X, 0, Y),
+                Size = UDim2.new(0, W, 0, H),
+                ZIndex = 8,
+                Parent = Rig,
+            })
+
+            Library:AddToRegistry(Part, { BackgroundColor3 = "FontColor"; })
+            Library:RegisterCorner(Part, 0.3)
+
+            return Part
+        end
+
+        Limb(0, 8, 14, 14)    -- head
+        Limb(0, 24, 18, 30)   -- torso
+        Limb(-13, 26, 6, 24)  -- left arm
+        Limb(13, 26, 6, 24)   -- right arm
+        Limb(-5, 54, 7, 24)   -- left leg
+        Limb(5, 54, 7, 24)    -- right leg
+
+        --// Palette for anything not placed \\--
+        local Palette = Library:Create("Frame", {
+            BackgroundTransparency = 1,
+            Position = UDim2.new(0, 0, 1, -24),
+            Size = UDim2.new(1, 0, 0, 22),
+            ZIndex = 6,
+            Parent = Holder,
+        })
+
+        Library:Create("UIListLayout", {
+            Padding = UDim.new(0, 4),
+            FillDirection = Enum.FillDirection.Horizontal,
+            HorizontalAlignment = Enum.HorizontalAlignment.Left,
+            VerticalAlignment = Enum.VerticalAlignment.Center,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Parent = Palette,
+        })
+
+        local DragLayer = Library:Create("Frame", {
+            BackgroundTransparency = 1,
+            Size = UDim2.fromScale(1, 1),
+            ZIndex = 30,
+            Parent = Holder,
+        })
+
+        --// Chips \\--
+        local Chips = {}
+
+        local function Changed()
+            Library:SafeCallback(Info.Callback, Panel.Value)
+
+            for _, Callback in next, Panel.Callbacks do
+                Library:SafeCallback(Callback, Panel.Value)
+            end
+        end
+
+        local function Dock(Chip, SlotName, SkipCallback)
+            Chip.Frame.AnchorPoint = Vector2.new(0, 0)
+            Chip.Frame.Position = UDim2.new()
+            Chip.Frame.Parent = SlotName and SlotFrames[SlotName] or Palette
+
+            Panel.Value[Chip.Name] = SlotName
+
+            if not SkipCallback then
+                Changed()
+            end
+        end
+
+        local function MakeChip(Name)
+            local Width = Library:GetTextBounds(Name, Library.Font, 13) + 12
+
+            local Frame = Library:Create("Frame", {
+                BackgroundColor3 = Library.BackgroundColor,
+                BorderSizePixel = 0,
+                Size = UDim2.new(0, Width, 0, 16),
+                ZIndex = 9,
+                Parent = Palette,
+            })
+
+            Library:AddToRegistry(Frame, { BackgroundColor3 = "BackgroundColor"; })
+            Library:RegisterStroke(Frame, "OutlineColor")
+            Library:RegisterCorner(Frame, 0.5)
+
+            Library:CreateLabel({
+                BackgroundTransparency = 1,
+                Size = UDim2.fromScale(1, 1),
+                TextSize = 13,
+                Text = Name,
+                TextXAlignment = Enum.TextXAlignment.Center,
+                ZIndex = 10,
+                Parent = Frame,
+            })
+
+            local Region = Library:Create("TextButton", {
+                BackgroundTransparency = 1,
+                Size = UDim2.fromScale(1, 1),
+                Text = "",
+                ZIndex = 11,
+                Parent = Frame,
+            })
+
+            local Chip = { Name = Name, Frame = Frame }
+
+            local Dragging, Hovered = false, nil
+
+            local function HighlightSlot(SlotName)
+                if Hovered == SlotName then return end
+                Hovered = SlotName
+            end
+
+            Region.InputBegan:Connect(function(Input)
+                if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+                    and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+                Dragging = true
+
+                Frame.Parent = DragLayer
+                Frame.AnchorPoint = Vector2.new(0.5, 0.5)
+                Frame.ZIndex = 31
+            end)
+
+            Library:GiveSignal(InputService.InputChanged:Connect(function(Input)
+                if not Dragging then return end
+                if Input.UserInputType ~= Enum.UserInputType.MouseMovement
+                    and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+                Frame.Position = UDim2.new(
+                    0, Mouse.X - DragLayer.AbsolutePosition.X,
+                    0, Mouse.Y - DragLayer.AbsolutePosition.Y
+                )
+
+                local Over = nil
+
+                for SlotName, Slot in next, SlotFrames do
+                    if Library:MouseIsOverFrame(Slot) then
+                        Over = SlotName
+                        break
+                    end
+                end
+
+                HighlightSlot(Over)
+            end))
+
+            Library:GiveSignal(InputService.InputEnded:Connect(function(Input)
+                if not Dragging then return end
+                if Input.UserInputType ~= Enum.UserInputType.MouseButton1
+                    and Input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+                Dragging = false
+                Frame.ZIndex = 9
+
+                local Target = nil
+
+                for SlotName, Slot in next, SlotFrames do
+                    if Library:MouseIsOverFrame(Slot) then
+                        Target = SlotName
+                        break
+                    end
+                end
+
+                Dock(Chip, Target)
+            end))
+
+            -- right click sends it back to the palette
+            Region.InputBegan:Connect(function(Input)
+                if Input.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
+                Dock(Chip, nil)
+            end)
+
+            table.insert(Library.FontCallbacks, function()
+                Frame.Size = UDim2.new(0, Library:GetTextBounds(Name, Library.Font, 13) + 12, 0, 16)
+            end)
+
+            Chips[Name] = Chip
+            return Chip
+        end
+
+        for _, Name in next, Panel.Features do
+            MakeChip(Name)
+        end
+
+        --// API \\--
+        function Panel:SetValue(NewValue, SkipCallback)
+            NewValue = typeof(NewValue) == "table" and NewValue or {}
+
+            for Name, Chip in next, Chips do
+                local SlotName = NewValue[Name]
+
+                if SlotName and not SlotFrames[SlotName] then
+                    SlotName = nil
+                end
+
+                Dock(Chip, SlotName, true)
+            end
+
+            if not SkipCallback then
+                Changed()
+            end
+        end
+
+        function Panel:GetLayout()
+            local Copy = {}
+
+            for Name, SlotName in next, Panel.Value do
+                Copy[Name] = SlotName
+            end
+
+            return Copy
+        end
+
+        function Panel:OnChanged(Func)
+            table.insert(Panel.Callbacks, Func)
+            Library:SafeCallback(Func, Panel.Value)
+        end
+
+        function Panel:Clear()
+            Panel:SetValue({})
+        end
+
+        function Panel:SetVisible(Visible)
+            Panel.Visible = Visible
+
+            Holder.Visible = Panel.Visible
+            if Blank then Blank.Visible = Panel.Visible end
+
+            Groupbox:Resize()
+        end
+
+        Panel:SetValue(Info.Default, true)
+
+        Blank = Groupbox:AddBlank(10, Panel.Visible)
+        Groupbox:Resize()
+
+        Panel.Holder = Holder
+        Panel.Container = Container
+        Panel.Index = Idx
+
+        table.insert(Groupbox.Elements, Panel)
+        Options[Idx] = Panel
+
+        Library:MakeFavoritable(Panel)
+        Library:UpdateDependencyBoxes()
+        Library:UpdateDependencyGroupboxes()
+
+        return Panel
+    end
+
     function BaseGroupboxFuncs:AddImage(Idx, Info)
         local Image = {
             Image = Info.Image,
