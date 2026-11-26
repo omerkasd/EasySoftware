@@ -6191,23 +6191,28 @@ do
             Parent = Container,
         })
 
-        Library:CreateLabel({
-            BackgroundTransparency = 1,
-            Size = UDim2.new(1, 0, 0, 16),
-            TextSize = 14,
-            Text = Panel.Text,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            ZIndex = 6,
-            Parent = Holder,
-        })
+        local HasTitle = typeof(Panel.Text) == "string" and Panel.Text ~= ""
+        local TitleOffset = HasTitle and 20 or 0
+
+        if HasTitle then
+            Library:CreateLabel({
+                BackgroundTransparency = 1,
+                Size = UDim2.new(1, 0, 0, 16),
+                TextSize = 14,
+                Text = Panel.Text,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                ZIndex = 6,
+                Parent = Holder,
+            })
+        end
 
         --// Preview \\--
         local Preview = Library:Create("Frame", {
             BackgroundColor3 = Library.BackgroundColor,
             BorderColor3 = Library.OutlineColor,
             ClipsDescendants = true,
-            Position = UDim2.new(0, 0, 0, 20),
-            Size = UDim2.new(1, 0, 1, -50),
+            Position = UDim2.new(0, 0, 0, TitleOffset),
+            Size = UDim2.new(1, 0, 1, -30 - TitleOffset),
             ZIndex = 6,
             Parent = Holder,
         })
@@ -6563,15 +6568,19 @@ do
         end
 
         function Panel:SetChams(Enabled, Colour, Transparency)
-            Chams.Enabled = Enabled and true or false
+            local NewEnabled = Enabled and true or false
+            local NewColour = typeof(Colour) == "Color3" and Colour or Chams.Color
+            local NewTransparency = tonumber(Transparency) and math.clamp(tonumber(Transparency), 0, 0.95) or Chams.Transparency
 
-            if typeof(Colour) == "Color3" then
-                Chams.Color = Colour
+            -- every setting in a menu tends to call this; touching the model's
+            -- textures when nothing changed makes the preview flicker
+            if NewEnabled == Chams.Enabled and NewColour == Chams.Color and NewTransparency == Chams.Transparency then
+                return
             end
 
-            if tonumber(Transparency) then
-                Chams.Transparency = math.clamp(tonumber(Transparency), 0, 0.95)
-            end
+            Chams.Enabled = NewEnabled
+            Chams.Color = NewColour
+            Chams.Transparency = NewTransparency
 
             ApplyChams()
         end
@@ -6596,12 +6605,12 @@ do
 
             local Aspect = Size and math.clamp(Size.X / Size.Y, 0.4, 0.85) or 0.55
 
-            local H = math.floor(Area.Y * 0.6)
+            local H = math.floor(Area.Y * 0.66)
             local W = math.floor(H * Aspect)
 
             -- keep room either side for text on the left and right
-            if W > Area.X * 0.4 then
-                W = math.floor(Area.X * 0.4)
+            if W > Area.X * 0.46 then
+                W = math.floor(Area.X * 0.46)
             end
 
             RigBox.Size = UDim2.fromOffset(W, H)
@@ -7001,13 +7010,20 @@ do
                 Item.Value = math.clamp(Sample, 0, 1)
 
                 Item.Root = Library:Create("Frame", {
-                    BackgroundColor3 = Color3.new(0, 0, 0),
-                    BackgroundTransparency = 0.3,
+                    BackgroundColor3 = Color3.fromRGB(38, 38, 38),
+                    BackgroundTransparency = 0,
                     BorderSizePixel = 0,
                     Size = UDim2.new(0, 3, 1, 0),
                     Visible = false,
                     ZIndex = 12,
                     Parent = Stacks.Left,
+                })
+
+                Library:Create("UIStroke", {
+                    ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+                    Color = Color3.new(0, 0, 0),
+                    Thickness = 1,
+                    Parent = Item.Root,
                 })
 
                 Item.Fill = Library:Create("Frame", {
@@ -7175,8 +7191,7 @@ do
             if typeof(Colour) ~= "Color3" then return end
 
             if Key == "Chams" then
-                Chams.Color = Colour
-                if Chams.Enabled then ApplyChams() end
+                Panel:SetChams(Chams.Enabled, Colour)
                 return
             end
 
@@ -7293,7 +7308,6 @@ do
         table.insert(Groupbox.Elements, Panel)
         Options[Idx] = Panel
 
-        Library:MakeFavoritable(Panel)
         Library:UpdateDependencyBoxes()
         Library:UpdateDependencyGroupboxes()
 
