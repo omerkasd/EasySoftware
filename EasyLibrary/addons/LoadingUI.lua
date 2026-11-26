@@ -11,8 +11,13 @@ local LoadingUI = {} do
         self.Library = library
     end
 
-    local function Tween(Instance, Properties, Time)
-        local Info = TweenInfo.new(Time or 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+    local function Tween(Instance, Properties, Time, Style)
+        local Info = TweenInfo.new(
+            Time or 0.2,
+            Style or Enum.EasingStyle.Quad,
+            Enum.EasingDirection.Out
+        )
+
         local Object = TweenService:Create(Instance, Info, Properties)
         Object:Play()
         return Object
@@ -25,7 +30,7 @@ local LoadingUI = {} do
 
         local Library = self.Library
         local Steps = Info.Steps or {}
-        local Size = Info.Size or UDim2.fromOffset(360, 94)
+        local Size = Info.Size or UDim2.fromOffset(380, 104)
 
         local Loader = {
             Steps = Steps,
@@ -34,7 +39,7 @@ local LoadingUI = {} do
             Finished = false,
         }
 
-        --// Frames \\--
+        --// Shell \\--
         local Outer = Library:Create("Frame", {
             AnchorPoint = Vector2.new(0.5, 0.5);
             BackgroundColor3 = Color3.new(0, 0, 0);
@@ -50,18 +55,15 @@ local LoadingUI = {} do
 
         local Inner = Library:Create("Frame", {
             BackgroundColor3 = Library.MainColor;
-            BorderColor3 = Library.AccentColor;
-            BorderMode = Enum.BorderMode.Inset;
+            BorderSizePixel = 0;
+            ClipsDescendants = true;
             Position = UDim2.new(0, 1, 0, 1);
             Size = UDim2.new(1, -2, 1, -2);
             ZIndex = 101;
             Parent = Outer;
         })
 
-        Library:AddToRegistry(Inner, {
-            BackgroundColor3 = "MainColor";
-            BorderColor3 = "AccentColor";
-        })
+        Library:AddToRegistry(Inner, { BackgroundColor3 = "MainColor"; })
 
         if Library.RegisterCorner then
             Library:RegisterCorner(Outer)
@@ -69,13 +71,24 @@ local LoadingUI = {} do
             Library:RegisterStroke(Inner, "AccentColor")
         end
 
+        -- the accent strip every groupbox wears
+        local Strip = Library:Create("Frame", {
+            BackgroundColor3 = Library.AccentColor;
+            BorderSizePixel = 0;
+            Size = UDim2.new(1, 0, 0, 2);
+            ZIndex = 105;
+            Parent = Inner;
+        })
+
+        Library:AddToRegistry(Strip, { BackgroundColor3 = "AccentColor"; })
+
         --// Text \\--
         local TitleLabel = Library:CreateLabel({
             BackgroundTransparency = 1;
-            Position = UDim2.new(0, 10, 0, 10);
-            Size = UDim2.new(1, -20, 0, 18);
+            Position = UDim2.new(0, 12, 0, 12);
+            Size = UDim2.new(1, -24, 0, 20);
             Text = Info.Title or "Loading";
-            TextSize = 16;
+            TextSize = 17;
             TextXAlignment = Enum.TextXAlignment.Left;
             ZIndex = 102;
             Parent = Inner;
@@ -83,11 +96,11 @@ local LoadingUI = {} do
 
         local StatusLabel = Library:CreateLabel({
             BackgroundTransparency = 1;
-            Position = UDim2.new(0, 10, 0, 30);
-            Size = UDim2.new(1, -60, 0, 16);
+            Position = UDim2.new(0, 12, 0, 34);
+            Size = UDim2.new(1, -70, 0, 16);
             Text = Info.Subtitle or (Steps[1] or "Please wait...");
             TextSize = 14;
-            TextTransparency = 0.35;
+            TextTransparency = 0.4;
             TextXAlignment = Enum.TextXAlignment.Left;
             ZIndex = 102;
             Parent = Inner;
@@ -95,11 +108,11 @@ local LoadingUI = {} do
 
         local PercentLabel = Library:CreateLabel({
             BackgroundTransparency = 1;
-            Position = UDim2.new(1, -50, 0, 30);
-            Size = UDim2.new(0, 40, 0, 16);
+            Position = UDim2.new(1, -56, 0, 34);
+            Size = UDim2.new(0, 44, 0, 16);
             Text = "0%";
             TextSize = 14;
-            TextTransparency = 0.35;
+            TextTransparency = 0.4;
             TextXAlignment = Enum.TextXAlignment.Right;
             ZIndex = 102;
             Parent = Inner;
@@ -108,45 +121,118 @@ local LoadingUI = {} do
         --// Progress bar \\--
         local BarOuter = Library:Create("Frame", {
             BackgroundColor3 = Library.BackgroundColor;
-            BorderColor3 = Library.OutlineColor;
-            BorderMode = Enum.BorderMode.Inset;
-            Position = UDim2.new(0, 10, 1, -24);
-            Size = UDim2.new(1, -20, 0, 12);
+            BorderSizePixel = 0;
+            Position = UDim2.new(0, 12, 1, -30);
+            Size = UDim2.new(1, -24, 0, 8);
             ZIndex = 102;
             Parent = Inner;
         })
 
-        Library:AddToRegistry(BarOuter, {
-            BackgroundColor3 = "BackgroundColor";
-            BorderColor3 = "OutlineColor";
-        })
+        Library:AddToRegistry(BarOuter, { BackgroundColor3 = "BackgroundColor"; })
 
         local BarFill = Library:Create("Frame", {
             BackgroundColor3 = Library.AccentColor;
             BorderSizePixel = 0;
+            ClipsDescendants = true;
             Size = UDim2.new(0, 0, 1, 0);
             ZIndex = 103;
             Parent = BarOuter;
         })
 
-        Library:AddToRegistry(BarFill, {
-            BackgroundColor3 = "AccentColor";
-        })
+        Library:AddToRegistry(BarFill, { BackgroundColor3 = "AccentColor"; })
 
         if Library.RegisterCorner then
-            Library:RegisterCorner(BarOuter, 0.5)
-            Library:RegisterCorner(BarFill, 0.5)
+            Library:RegisterCorner(BarOuter, 0.8)
+            Library:RegisterCorner(BarFill, 0.8)
             Library:RegisterStroke(BarOuter, "OutlineColor")
         end
 
-        Library:Create("UIGradient", {
-            Color = ColorSequence.new({
-                ColorSequenceKeypoint.new(0, Color3.new(1, 1, 1)),
-                ColorSequenceKeypoint.new(1, Color3.fromRGB(190, 190, 190)),
-            });
-            Rotation = 90;
+        -- a slow sheen so the bar does not look frozen while a step takes a while
+        local Sheen = Library:Create("Frame", {
+            BackgroundColor3 = Color3.new(1, 1, 1);
+            BackgroundTransparency = 0.75;
+            BorderSizePixel = 0;
+            Size = UDim2.new(0, 40, 1, 0);
+            Position = UDim2.new(0, -40, 0, 0);
+            ZIndex = 104;
             Parent = BarFill;
         })
+
+        Library:Create("UIGradient", {
+            Transparency = NumberSequence.new({
+                NumberSequenceKeypoint.new(0, 1),
+                NumberSequenceKeypoint.new(0.5, 0),
+                NumberSequenceKeypoint.new(1, 1),
+            });
+            Parent = Sheen;
+        })
+
+        task.spawn(function()
+            while not Loader.Finished and Sheen.Parent do
+                Sheen.Position = UDim2.new(0, -40, 0, 0)
+                Tween(Sheen, { Position = UDim2.new(1, 0, 0, 0) }, 1.1, Enum.EasingStyle.Linear)
+                task.wait(1.6)
+            end
+        end)
+
+        --// Step dots \\--
+        local Dots = {}
+
+        if #Steps > 1 then
+            local DotRow = Library:Create("Frame", {
+                AnchorPoint = Vector2.new(1, 0);
+                BackgroundTransparency = 1;
+                Position = UDim2.new(1, -12, 0, 14);
+                Size = UDim2.new(0, #Steps * 10, 0, 8);
+                ZIndex = 102;
+                Parent = Inner;
+            })
+
+            Library:Create("UIListLayout", {
+                Padding = UDim.new(0, 4);
+                FillDirection = Enum.FillDirection.Horizontal;
+                HorizontalAlignment = Enum.HorizontalAlignment.Right;
+                VerticalAlignment = Enum.VerticalAlignment.Center;
+                SortOrder = Enum.SortOrder.LayoutOrder;
+                Parent = DotRow;
+            })
+
+            for Index = 1, #Steps do
+                local Dot = Library:Create("Frame", {
+                    BackgroundColor3 = Library.OutlineColor;
+                    BorderSizePixel = 0;
+                    LayoutOrder = Index;
+                    Size = UDim2.new(0, 6, 0, 6);
+                    ZIndex = 103;
+                    Parent = DotRow;
+                })
+
+                Library:AddToRegistry(Dot, { BackgroundColor3 = "OutlineColor"; })
+
+                if Library.RegisterCorner then
+                    Library:RegisterCorner(Dot, 0.6)
+                end
+
+                Dots[Index] = Dot
+            end
+        end
+
+        local function PaintDots()
+            for Index, Dot in next, Dots do
+                local Done = Index <= Loader.StepIndex
+                local Key = Done and "AccentColor" or "OutlineColor"
+
+                Tween(Dot, { BackgroundColor3 = Library[Key] }, 0.2)
+
+                if Library.RegistryMap[Dot] then
+                    Library.RegistryMap[Dot].Properties.BackgroundColor3 = Key
+                end
+            end
+        end
+
+        --// Open animation \\--
+        local Scale = Library:Create("UIScale", { Scale = 0.94, Parent = Outer })
+        Tween(Scale, { Scale = 1 }, 0.22, Enum.EasingStyle.Back)
 
         --// API \\--
 
@@ -159,7 +245,7 @@ local LoadingUI = {} do
 
             Loader.Progress = Value
 
-            Tween(BarFill, { Size = UDim2.new(Value, 0, 1, 0) }, 0.25)
+            Tween(BarFill, { Size = UDim2.new(Value, 0, 1, 0) }, 0.3)
             PercentLabel.Text = string.format("%d%%", math.floor(Value * 100 + 0.5))
         end
 
@@ -183,6 +269,7 @@ local LoadingUI = {} do
 
             local Total = math.max(#Steps, Loader.StepIndex)
             Loader:SetProgress(Loader.StepIndex / Total)
+            PaintDots()
         end
 
         function Loader:Destroy()
@@ -195,10 +282,12 @@ local LoadingUI = {} do
         function Loader:Finish(Callback)
             if Loader.Finished then return end
 
+            Loader.StepIndex = #Steps
             Loader:SetProgress(1, true)
             Loader:SetStatus(Info.FinishText or "Done")
+            PaintDots()
 
-            task.wait(Info.FinishDelay or 0.4)
+            task.wait(Info.FinishDelay or 0.45)
             Loader.Finished = true
 
             local Time = Info.FadeTime or 0.3
@@ -216,6 +305,7 @@ local LoadingUI = {} do
             end
 
             Tween(Outer, { BackgroundTransparency = 1 }, Time)
+            Tween(Scale, { Scale = 0.96 }, Time)
 
             task.wait(Time)
             Outer:Destroy()
