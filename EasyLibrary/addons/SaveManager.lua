@@ -51,6 +51,10 @@ local SaveManager = {} do
     SaveManager.Library = nil
     SaveManager.UseLoadingOrder = false
     SaveManager.LoadingOrder = {}
+    SaveManager.ActiveConfig = nil
+    SaveManager.Dirty = false
+    SaveManager.AutoSave = false
+    SaveManager.AutoSaveDelay = 2
     SaveManager.Parser = {
         Toggle = {
             Save = function(idx, object)
@@ -102,6 +106,17 @@ local SaveManager = {} do
             Load = function(idx, data)
                 if SaveManager.Library.Options[idx] then
                     SaveManager.Library.Options[idx]:SetValue({ data.key, data.mode, data.modifiers })
+                end
+            end,
+        },
+        ESPPanel = {
+            Save = function(idx, object)
+                return { type = 'ESPPanel', idx = idx, layout = object.Value }
+            end,
+            Load = function(idx, data)
+                local object = SaveManager.Library.Options[idx]
+                if object and typeof(data.layout) == 'table' then
+                    object:SetValue(data.layout)
                 end
             end,
         },
@@ -248,6 +263,11 @@ local SaveManager = {} do
         end
 
         writefile(fullPath, encoded)
+
+        self.ActiveConfig = name
+        self.Dirty = false
+        self:RefreshStatus()
+
         return true
     end
 
@@ -283,6 +303,14 @@ local SaveManager = {} do
             task.spawn(self.Parser[option.type].Load, option.idx, option) -- task.spawn() so the config loading wont get stuck.
         end
 
+        self.ActiveConfig = name
+
+        -- loading fires every change callback, so settle the flag after they land
+        task.defer(function()
+            self.Dirty = false
+            self:RefreshStatus()
+        end)
+
         return true
     end
 
@@ -301,7 +329,109 @@ local SaveManager = {} do
         local success = pcall(delfile, file)
         if not success then return false, 'delete file error' end
 
+        if self.ActiveConfig == name then
+            self.ActiveConfig = nil
+            self.Dirty = false
+            self:RefreshStatus()
+        end
+
         return true
+    end
+
+    function SaveManager:ConfigPath(name)
+        if self:CheckSubFolder(true) then
+            return self.Folder .. "/settings/" .. self.SubFolder .. "/" .. name .. ".json"
+        end
+
+        return self.Folder .. "/settings/" .. name .. ".json"
+    end
+
+    function SaveManager:ConfigExists(name)
+        if typeof(name) ~= "string" or name:gsub(" ", "") == "" then return false end
+        return isfile(self:ConfigPath(name))
+    end
+
+    function SaveManager:Duplicate(from, to)
+        if not self:ConfigExists(from) then return false, "config does not exist" end
+        if self:ConfigExists(to) then return false, "a config with that name already exists" end
+
+        local ok, data = pcall(readfile, self:ConfigPath(from))
+        if not ok then return false, "could not read the config" end
+
+        local written = pcall(writefile, self:ConfigPath(to), data)
+        if not written then return false, "could not write the config" end
+
+        return true
+    end
+
+    function SaveManager:Rename(from, to)
+        local ok, err = self:Duplicate(from, to)
+        if not ok then return false, err end
+
+        self:Delete(from)
+
+        if self.ActiveConfig == from then
+            self.ActiveConfig = to
+            self:RefreshStatus()
+        end
+
+        return true
+    end
+
+    -- Keeps the status line under the config list honest.
+    function SaveManager:RefreshStatus()
+        if not self.StatusLabel then return end
+
+        local Text = self.ActiveConfig
+            and string.format("Active: %s%s", self.ActiveConfig, self.Dirty and "  (unsaved)" or "")
+            or "No config loaded"
+
+        self.StatusLabel:SetText(Text)
+    end
+
+    function SaveManager:MarkDirty()
+        if self.Dirty then return end
+
+        self.Dirty = true
+        self:RefreshStatus()
+
+        if not (self.AutoSave and self.ActiveConfig) then return end
+
+        task.delay(self.AutoSaveDelay, function()
+            if self.AutoSave and self.Dirty and self.ActiveConfig then
+                self:Save(self.ActiveConfig)
+            end
+        end)
+    end
+
+    -- Every saved element marks the config dirty when the user changes it.
+    function SaveManager:WatchChanges()
+        local function Watch(Collection)
+            for idx, object in next, Collection do
+                if typeof(object) ~= "table" then continue end
+                if not object.Type or not self.Parser[object.Type] then continue end
+                if self.Ignore[idx] then continue end
+                if object.__SaveManagerWatched then continue end
+
+                object.__SaveManagerWatched = true
+
+                -- the library keeps one Changed function per element, so wrap
+                -- whatever is there rather than calling OnChanged, which would
+                -- replace the script's own callback
+                local Existing = object.Changed
+
+                object.Changed = function(...)
+                    self:MarkDirty()
+
+                    if typeof(Existing) == "function" then
+                        Existing(...)
+                    end
+                end
+            end
+        end
+
+        Watch(self.Library.Toggles)
+        Watch(self.Library.Options)
     end
 
     function SaveManager:RefreshConfigList()
@@ -433,101 +563,186 @@ local SaveManager = {} do
     function SaveManager:BuildConfigSection(tab)
         assert(self.Library, 'SaveManager:BuildConfigSection -> Must set SaveManager.Library')
 
+        local Library = self.Library
         local section = tab:AddRightGroupbox('Configuration')
 
-        section:AddInput('SaveManager_ConfigName',    { Text = 'Config name' })
-        section:AddButton('Create config', function()
-            local name = self.Library.Options.SaveManager_ConfigName.Value
+        local function Selected()
+            local name = Library.Options.SaveManager_ConfigList.Value
+            if typeof(name) ~= "string" or name == "" then return nil end
+            return name
+        end
 
-            if name:gsub(' ', '') == '' then
-                self.Library:Notify('Invalid config name (empty)', 2)
-                return
-            end
+        local function Typed()
+            local name = Library.Options.SaveManager_ConfigName.Value
+            if typeof(name) ~= "string" or name:gsub(' ', '') == '' then return nil end
+            return name
+        end
 
-            local success, err = self:Save(name)
-            if not success then
-                self.Library:Notify('Failed to create config: ' .. err)
-                return
-            end
+        local function Refresh(select)
+            Library.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
+            Library.Options.SaveManager_ConfigList:SetValue(select)
+        end
 
-            self.Library:Notify(string.format('Created config %q', name))
-
-            self.Library.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
-            self.Library.Options.SaveManager_ConfigList:SetValue(nil)
-        end)
+        --// Status \\--
+        self.StatusLabel = section:AddLabel('No config loaded', true)
+        self.AutoloadConfigLabel = section:AddLabel('Autoload: ' .. self:GetAutoloadConfig(), true)
 
         section:AddDivider()
 
-        section:AddDropdown('SaveManager_ConfigList', { Text = 'Config list', Values = self:RefreshConfigList(), AllowNull = true })
-        section:AddButton('Load config', function()
-            local name = self.Library.Options.SaveManager_ConfigList.Value
+        --// Pick one \\--
+        section:AddDropdown('SaveManager_ConfigList', {
+            Text = 'Config list',
+            Values = self:RefreshConfigList(),
+            AllowNull = true,
+            Searchable = true,
+        })
 
-            local success, err = self:Load(name)
-            if not success then
-                self.Library:Notify('Failed to load config: ' .. err)
-                return
-            end
+        section:AddButton({
+            Text = 'Load',
+            Func = function()
+                local name = Selected()
+                if not name then return Library:Notify('Pick a config first', 3) end
 
-            self.Library:Notify(string.format('Loaded config %q', name))
+                local ok, err = self:Load(name)
+                if not ok then return Library:Notify('Failed to load: ' .. err, 4) end
+
+                Library:Notify(string.format('Loaded %q', name), 3)
+                self:RefreshStatus()
+            end,
+        }):AddButton({
+            Text = 'Save',
+            Tooltip = 'Overwrites the selected config',
+            Func = function()
+                local name = Selected() or self.ActiveConfig
+                if not name then return Library:Notify('Pick a config first', 3) end
+
+                local ok, err = self:Save(name)
+                if not ok then return Library:Notify('Failed to save: ' .. err, 4) end
+
+                Library:Notify(string.format('Saved %q', name), 3)
+            end,
+        })
+
+        section:AddButton({
+            Text = 'Duplicate',
+            Func = function()
+                local from, to = Selected(), Typed()
+                if not from then return Library:Notify('Pick a config first', 3) end
+                if not to then return Library:Notify('Type a name for the copy', 3) end
+
+                local ok, err = self:Duplicate(from, to)
+                if not ok then return Library:Notify('Failed to duplicate: ' .. err, 4) end
+
+                Library:Notify(string.format('Copied %q to %q', from, to), 3)
+                Refresh(to)
+            end,
+        }):AddButton({
+            Text = 'Rename',
+            Func = function()
+                local from, to = Selected(), Typed()
+                if not from then return Library:Notify('Pick a config first', 3) end
+                if not to then return Library:Notify('Type the new name', 3) end
+
+                local ok, err = self:Rename(from, to)
+                if not ok then return Library:Notify('Failed to rename: ' .. err, 4) end
+
+                Library:Notify(string.format('Renamed to %q', to), 3)
+                Refresh(to)
+            end,
+        })
+
+        section:AddButton({
+            Text = 'Delete',
+            DoubleClick = true,
+            Tooltip = 'Double click, this cannot be undone',
+            Func = function()
+                local name = Selected()
+                if not name then return Library:Notify('Pick a config first', 3) end
+
+                local ok, err = self:Delete(name)
+                if not ok then return Library:Notify('Failed to delete: ' .. err, 4) end
+
+                Library:Notify(string.format('Deleted %q', name), 3)
+                Refresh(nil)
+            end,
+        }):AddButton({
+            Text = 'Refresh list',
+            Func = function() Refresh(Selected()) end,
+        })
+
+        section:AddDivider()
+
+        --// Make a new one \\--
+        section:AddInput('SaveManager_ConfigName', {
+            Text = 'New config name',
+            Placeholder = 'name',
+            Finished = true,
+        })
+
+        section:AddButton({
+            Text = 'Create',
+            Func = function()
+                local name = Typed()
+                if not name then return Library:Notify('Type a name first', 3) end
+
+                if self:ConfigExists(name) then
+                    return Library:Notify('That config already exists, use Save to overwrite it', 4)
+                end
+
+                local ok, err = self:Save(name)
+                if not ok then return Library:Notify('Failed to create: ' .. err, 4) end
+
+                Library:Notify(string.format('Created %q', name), 3)
+                Refresh(name)
+            end,
+        })
+
+        section:AddDivider()
+
+        --// Autoload and autosave \\--
+        section:AddButton({
+            Text = 'Set autoload',
+            Func = function()
+                local name = Selected()
+                if not name then return Library:Notify('Pick a config first', 3) end
+
+                local ok, err = self:SaveAutoloadConfig(name)
+                if not ok then return Library:Notify('Failed: ' .. err, 4) end
+
+                Library:Notify(string.format('%q will load on start', name), 3)
+                self.AutoloadConfigLabel:SetText('Autoload: ' .. name)
+            end,
+        }):AddButton({
+            Text = 'Clear autoload',
+            Func = function()
+                local ok, err = self:DeleteAutoLoadConfig()
+                if not ok then return Library:Notify('Failed: ' .. err, 4) end
+
+                Library:Notify('Autoload cleared', 3)
+                self.AutoloadConfigLabel:SetText('Autoload: none')
+            end,
+        })
+
+        section:AddToggle('SaveManager_AutoSave', {
+            Text = 'Autosave',
+            Tooltip = 'Writes changes to the active config a couple of seconds after you make them',
+            Default = false,
+            Callback = function(Value)
+                self.AutoSave = Value
+
+                if Value and self.Dirty and self.ActiveConfig then
+                    self:Save(self.ActiveConfig)
+                end
+            end,
+        })
+
+        self:SetIgnoreIndexes({ 'SaveManager_ConfigList', 'SaveManager_ConfigName', 'SaveManager_AutoSave' })
+        self:RefreshStatus()
+
+        -- hook this last so every element built before it is covered
+        task.defer(function()
+            self:WatchChanges()
         end)
-        section:AddButton('Overwrite config', function()
-            local name = self.Library.Options.SaveManager_ConfigList.Value
-
-            local success, err = self:Save(name)
-            if not success then
-                self.Library:Notify('Failed to overwrite config: ' .. err)
-                return
-            end
-
-            self.Library:Notify(string.format('Overwrote config %q', name))
-        end)
-
-        section:AddButton('Delete config', function()
-            local name = self.Library.Options.SaveManager_ConfigList.Value
-
-            local success, err = self:Delete(name)
-            if not success then
-                self.Library:Notify('Failed to delete config: ' .. err)
-                return
-            end
-
-            self.Library:Notify(string.format('Deleted config %q', name))
-            self.Library.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
-            self.Library.Options.SaveManager_ConfigList:SetValue(nil)
-        end)
-
-        section:AddButton('Refresh list', function()
-            self.Library.Options.SaveManager_ConfigList:SetValues(self:RefreshConfigList())
-            self.Library.Options.SaveManager_ConfigList:SetValue(nil)
-        end)
-
-        section:AddButton('Set as autoload', function()
-            local name = self.Library.Options.SaveManager_ConfigList.Value
-
-            local success, err = self:SaveAutoloadConfig(name)
-            if not success then
-                self.Library:Notify('Failed to set autoload config: ' .. err)
-                return
-            end
-
-            self.Library:Notify(string.format('Set %q to auto load', name))
-            self.AutoloadConfigLabel:SetText('Current autoload config: ' .. name)
-        end)
-        section:AddButton('Reset autoload', function()
-            local success, err = self:DeleteAutoLoadConfig()
-            if not success then
-                self.Library:Notify('Failed to set autoload config: ' .. err)
-                return
-            end
-
-            self.Library:Notify('Set autoload to none')
-            self.AutoloadConfigLabel:SetText('Current autoload config: none')
-        end)
-
-        self.AutoloadConfigLabel = section:AddLabel("Current autoload config: " .. self:GetAutoloadConfig(), true)
-
-        -- self:LoadAutoloadConfig()
-        self:SetIgnoreIndexes({ 'SaveManager_ConfigList', 'SaveManager_ConfigName' })
     end
 
     SaveManager:BuildFolderTree()
